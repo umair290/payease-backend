@@ -158,3 +158,50 @@ def confirm_otp():
         "error":    message,
         "verified": False
     }), 400
+    @auth_bp.route('/setup-admin', methods=['POST'])
+def setup_admin():
+    data = request.get_json()
+    secret = data.get('secret')
+    
+    # Secret key to protect this route
+    if secret != 'payease-setup-2024':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    from models.user import User
+    from models.wallet import Wallet
+    import bcrypt
+    import random
+    
+    # Check if admin already exists
+    existing = User.query.filter_by(email='admin@payease.com').first()
+    if existing:
+        existing.is_admin = True
+        existing.kyc_verified = True
+        db.session.commit()
+        return jsonify({'message': 'Admin updated!'})
+    
+    # Create admin
+    hashed_password = bcrypt.hashpw('admin123'.encode(), bcrypt.gensalt()).decode()
+    hashed_pin = bcrypt.hashpw('0000'.encode(), bcrypt.gensalt()).decode()
+    
+    admin = User(
+        full_name='Admin',
+        email='admin@payease.com',
+        phone='03000000000',
+        password=hashed_password,
+        pin=hashed_pin,
+        is_admin=True,
+        kyc_verified=True
+    )
+    db.session.add(admin)
+    db.session.flush()
+    
+    wallet = Wallet(
+        user_id=admin.id,
+        wallet_number='PK' + ''.join([str(random.randint(0,9)) for _ in range(10)]),
+        balance=100000
+    )
+    db.session.add(wallet)
+    db.session.commit()
+    
+    return jsonify({'message': 'Admin created successfully!'})

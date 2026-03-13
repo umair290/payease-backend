@@ -158,7 +158,9 @@ def confirm_otp():
         "error":    message,
         "verified": False
     }), 400
-    @auth_bp.route('/setup-admin', methods=['POST'])
+    
+    
+@auth_bp.route('/setup-admin', methods=['POST'])
 def setup_admin():
     data = request.get_json()
     secret = data.get('secret')

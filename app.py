@@ -1,11 +1,14 @@
 from flask import Flask
 from config import config
 from extensions import db, jwt
+from flask_cors import CORS
 from models import User, Wallet, Transaction, Bill, KYC
 import os
 
 def create_app(config_name="default"):
     app = Flask(__name__)
+
+    CORS(app)
     
     # Load config
     app.config.from_object(config[config_name])

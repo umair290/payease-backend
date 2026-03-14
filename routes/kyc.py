@@ -31,10 +31,20 @@ def submit_kyc():
     # Check if KYC already submitted
     existing = KYC.query.filter_by(user_id=user_id).first()
     if existing:
-        return jsonify({
-            "error":  "KYC already submitted",
-            "status": existing.status
-        }), 409
+        if existing.status == 'pending':
+            return jsonify({
+                "error": "KYC already submitted",
+                "status": "pending"
+            }), 409
+        elif existing.status == 'approved':
+            return jsonify({
+                "error": "KYC already approved",
+                "status": "approved"
+            }), 409
+        elif existing.status == 'rejected':
+            # Allow resubmission - delete old KYC
+            db.session.delete(existing)
+            db.session.commit()
 
     # Get CNIC number
     cnic_number = request.form.get("cnic_number")

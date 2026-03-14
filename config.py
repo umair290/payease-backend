@@ -9,10 +9,11 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = 3600 #1 hour
 
     #Databse settings
-    #Using SQLlite for development, for production will use PostgreSQL (umair notes)
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URI", "sqlite:///payease.db"
-    )
+    database_url = os.environ.get('DATABASE_URL', 'sqlite:///payease.db')
+    # Fix for Railway PostgreSQL URL format
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     #File upload settings for KYC

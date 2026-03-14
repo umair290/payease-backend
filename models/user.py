@@ -27,6 +27,7 @@ class User(db.Model):
             "full_name": self.full_name,
             "email": self.email,
             "phone": self.phone,
+            "is_admin": self.is_admin,
             "is_blocked": self.is_blocked,
             "kyc_verified": self.kyc_verified,
             "created_at": str(self.created_at)

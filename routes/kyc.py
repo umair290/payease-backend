@@ -1,121 +1,99 @@
-from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from extensions import db
-from models import User, KYC
 import os
 import uuid
-from datetime import datetime
+import cloudinary
+import cloudinary.uploader
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from extensions import db
+from models.user import User
+from models.kyc import KYC
+from flask import current_app
 
-kyc_bp = Blueprint("kyc", __name__)
+kyc_bp = Blueprint('kyc', __name__)
 
+def upload_to_cloudinary(file):
+    cloudinary.config(
+        cloud_name=current_app.config['CLOUDINARY_CLOUD_NAME'],
+        api_key=current_app.config['CLOUDINARY_API_KEY'],
+        api_secret=current_app.config['CLOUDINARY_API_SECRET']
+    )
+    result = cloudinary.uploader.upload(
+        file,
+        folder='payease/kyc',
+        resource_type='image'
+    )
+    return result['secure_url']
 
-def allowed_file(filename):
-    allowed = {"png", "jpg", "jpeg"}
-    return "." in filename and \
-           filename.rsplit(".", 1)[1].lower() in allowed
-
-
-def save_image(file, folder):
-    ext = file.filename.rsplit(".", 1)[1].lower()
-    filename = f"{uuid.uuid4().hex}.{ext}"
-    path = os.path.join("uploads", "kyc", folder, filename)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    file.save(path)
-    return path
-@kyc_bp.route("/submit", methods=["POST"])
+@kyc_bp.route('/submit', methods=['POST'])
 @jwt_required()
 def submit_kyc():
     user_id = get_jwt_identity()
-    user    = User.query.get(user_id)
+    user = User.query.get(user_id)
 
     # Check if KYC already submitted
     existing = KYC.query.filter_by(user_id=user_id).first()
     if existing:
         if existing.status == 'pending':
-            return jsonify({
-                "error": "KYC already submitted",
-                "status": "pending"
-            }), 409
+            return jsonify({'error': 'KYC already submitted', 'status': 'pending'}), 409
         elif existing.status == 'approved':
-            return jsonify({
-                "error": "KYC already approved",
-                "status": "approved"
-            }), 409
+            return jsonify({'error': 'KYC already approved', 'status': 'approved'}), 409
         elif existing.status == 'rejected':
-            # Allow resubmission - delete old KYC
             db.session.delete(existing)
             db.session.commit()
 
-    # Get CNIC number
-    cnic_number = request.form.get("cnic_number")
+    # Get form data
+    cnic_number = request.form.get('cnic_number')
     if not cnic_number:
-        return jsonify({"error": "CNIC number is required"}), 400
+        return jsonify({'error': 'CNIC number is required'}), 400
 
-    # Validate CNIC format (13 digits)
-    cnic_clean = cnic_number.replace("-", "")
-    if not cnic_clean.isdigit() or len(cnic_clean) != 13:
-        return jsonify({"error": "Invalid CNIC format"}), 400
+    if len(cnic_number) != 13 or not cnic_number.isdigit():
+        return jsonify({'error': 'CNIC must be 13 digits'}), 400
 
-    # Check if CNIC already used
-    if KYC.query.filter_by(cnic_number=cnic_clean).first():
-        return jsonify({"error": "CNIC already registered"}), 409
-
-    # Get uploaded files
-    cnic_front = request.files.get("cnic_front")
-    cnic_back  = request.files.get("cnic_back")
-    selfie     = request.files.get("selfie")
+    # Get files
+    cnic_front = request.files.get('cnic_front')
+    cnic_back = request.files.get('cnic_back')
+    selfie = request.files.get('selfie')
 
     if not cnic_front or not cnic_back or not selfie:
-        return jsonify({"error": "All images are required"}), 400
-
-    # Validate file types
-    for f in [cnic_front, cnic_back, selfie]:
-        if not allowed_file(f.filename):
-            return jsonify({"error": "Only jpg/png files allowed"}), 400
+        return jsonify({'error': 'All documents are required'}), 400
 
     try:
-        # Save images
-        front_path  = save_image(cnic_front, user_id)
-        back_path   = save_image(cnic_back,  user_id)
-        selfie_path = save_image(selfie,     user_id)
+        # Upload to Cloudinary
+        cnic_front_url = upload_to_cloudinary(cnic_front)
+        cnic_back_url = upload_to_cloudinary(cnic_back)
+        selfie_url = upload_to_cloudinary(selfie)
 
-        # Create KYC record
+        # Save KYC
         kyc = KYC(
-            user_id     = user_id,
-            cnic_number = cnic_clean,
-            cnic_front  = front_path,
-            cnic_back   = back_path,
-            selfie      = selfie_path,
-            status      = "pending"
+            user_id=user_id,
+            cnic_number=cnic_number,
+            cnic_front=cnic_front_url,
+            cnic_back=cnic_back_url,
+            selfie=selfie_url,
+            status='pending'
         )
         db.session.add(kyc)
         db.session.commit()
 
-        return jsonify({
-            "message": "KYC submitted successfully!",
-            "status":  "pending"
-        }), 201
+        return jsonify({'message': 'KYC submitted successfully!'}), 201
 
     except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 
-@kyc_bp.route("/status", methods=["GET"])
+@kyc_bp.route('/status', methods=['GET'])
 @jwt_required()
 def kyc_status():
     user_id = get_jwt_identity()
-    kyc     = KYC.query.filter_by(user_id=user_id).first()
+    kyc = KYC.query.filter_by(user_id=user_id).first()
 
     if not kyc:
-        return jsonify({
-            "status":  "not_submitted",
-            "message": "KYC not submitted yet"
-        }), 200
+        return jsonify({'status': None}), 200
 
     return jsonify({
-        "status":           kyc.status,
-        "cnic_number":      kyc.cnic_number,
-        "submitted_at":     str(kyc.submitted_at),
-        "rejection_reason": kyc.rejection_reason
+        'status': kyc.status,
+        'cnic_number': kyc.cnic_number,
+        'rejection_reason': kyc.rejection_reason,
+        'submitted_at': str(kyc.submitted_at),
+        'verified_at': str(kyc.verified_at) if kyc.verified_at else None,
     }), 200

@@ -14,6 +14,13 @@ class Config:
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Cloudinary settings
+    CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME', 'debkhln5h')
+    CLOUDINARY_API_KEY = os.environ.get('CLOUDINARY_API_KEY', '663954632474482')
+    CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET', 'sT4-evyiUqtJagfeeLnBiwx5pJE')
+
+
+
 
     # File upload settings for KYC
     UPLOAD_FOLDER = "uploads/kyc"

@@ -189,3 +189,29 @@ def lookup_wallet():
         'wallet_number': wallet_number,
         'kyc_verified': user.kyc_verified
     }), 200
+    @account_bp.route('/lookup-phone', methods=['POST'])
+@jwt_required()
+def lookup_by_phone():
+    data = request.get_json()
+    phone = data.get('phone')
+    
+    if not phone:
+        return jsonify({'error': 'Phone number required'}), 400
+    
+    user = User.query.filter_by(phone=phone).first()
+    if not user:
+        return jsonify({'error': 'No account found with this phone number'}), 404
+    
+    wallet = Wallet.query.filter_by(user_id=user.id).first()
+    if not wallet:
+        return jsonify({'error': 'Wallet not found'}), 404
+    
+    return jsonify({
+        'full_name': user.full_name,
+        'phone': user.phone,
+        'wallet_number': wallet.wallet_number,
+        'kyc_verified': user.kyc_verified
+    }), 200
+
+
+

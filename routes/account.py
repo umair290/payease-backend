@@ -186,5 +186,6 @@ def lookup_wallet():
     return jsonify({
         'full_name': user.full_name,
         'phone': user.phone,
-        'wallet_number': wallet_number
+        'wallet_number': wallet_number,
+        'kyc_verified': user.kyc_verified
     }), 200

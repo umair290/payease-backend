@@ -12,7 +12,8 @@ otp_bp = Blueprint('otp', __name__)
 # Temporary OTP storage
 otp_store = {}
 
-resend.api_key = "re_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW"
+import os
+resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
 
 def generate_otp():
     return ''.join(random.choices(string.digits, k=6))

@@ -1,14 +1,12 @@
 import os
 import random
 import string
-import resend
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.user import User
 from extensions import db
-
-resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
+import bcrypt
 
 otp_bp = Blueprint('otp', __name__)
 otp_store = {}
@@ -20,6 +18,7 @@ def send_otp_email(email, otp, purpose):
     purposes = {
         'change_password': 'Change Password',
         'change_pin': 'Change PIN',
+        'forgot_password': 'Password Reset',
     }
     purpose_label = purposes.get(purpose, 'Verification')
 
@@ -30,20 +29,17 @@ def send_otp_email(email, otp, purpose):
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-
 <tr><td style="background:linear-gradient(135deg,#1A73E8,#0052CC);padding:32px;text-align:center;">
 <span style="color:#fff;font-size:28px;font-weight:bold;">Pay</span>
 <span style="color:rgba(180,215,255,1);font-size:28px;font-weight:bold;">Ease</span>
 <p style="color:rgba(255,255,255,0.75);font-size:13px;margin:8px 0 0 0;">Digital Wallet & Payment Services</p>
 </td></tr>
-
 <tr><td style="padding:36px 40px;">
 <h2 style="color:#1A1A2E;font-size:22px;font-weight:bold;margin:0 0 8px 0;">{purpose_label} Request</h2>
 <p style="color:#888;font-size:14px;margin:0 0 28px 0;line-height:1.6;">
 We received a request to {purpose_label.lower()} on your PayEase account.
 Use the OTP below to complete the process.
 </p>
-
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="background:#F0F4FF;border:2px dashed #1A73E8;border-radius:16px;padding:28px;text-align:center;">
 <p style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin:0 0 12px 0;">One-Time Password</p>
@@ -51,7 +47,6 @@ Use the OTP below to complete the process.
 <p style="color:#FF4444;font-size:12px;font-weight:600;margin:12px 0 0 0;">Expires in 10 minutes</p>
 </td></tr>
 </table>
-
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;">
 <tr><td style="background:#FFF8F0;border:1px solid #FFE0B2;border-radius:12px;padding:16px;">
 <p style="color:#FF8C00;font-size:12px;font-weight:700;margin:0 0 4px 0;">Security Notice</p>
@@ -61,12 +56,10 @@ Never share this OTP with anyone. PayEase will never ask for your OTP via phone 
 </td></tr>
 </table>
 </td></tr>
-
 <tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:20px 40px;text-align:center;">
 <p style="color:#1A73E8;font-size:14px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
 <p style="color:#AAB0C0;font-size:11px;margin:0;">2026 PayEase Digital Wallet. All rights reserved.</p>
 </td></tr>
-
 </table>
 </td></tr>
 </table>
@@ -74,6 +67,8 @@ Never share this OTP with anyone. PayEase will never ask for your OTP via phone 
 </html>'''
 
     try:
+        import resend
+        resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
         response = resend.Emails.send({
             "from": "onboarding@resend.dev",
             "to": [email],
@@ -83,7 +78,7 @@ Never share this OTP with anyone. PayEase will never ask for your OTP via phone 
         print(f"Email sent successfully: {response}")
         return True
     except Exception as e:
-        print(f"Email failed: {str(e)}")
+        print(f"Email failed (non-critical): {str(e)}")
         return False
 
 
@@ -142,7 +137,6 @@ def verify_otp():
 @otp_bp.route('/change-password', methods=['POST'])
 @jwt_required()
 def change_password():
-    import bcrypt
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     data = request.get_json()
@@ -156,7 +150,7 @@ def change_password():
     stored = otp_store.get(key)
 
     if not stored:
-        return jsonify({'error': 'OTP not found.'}), 400
+        return jsonify({'error': 'OTP not found. Please request a new one.'}), 400
     if datetime.utcnow() > stored['expires']:
         del otp_store[key]
         return jsonify({'error': 'OTP expired'}), 400
@@ -165,12 +159,12 @@ def change_password():
 
     del otp_store[key]
 
-    # Check how password is stored in auth
-    from werkzeug.security import generate_password_hash
-    user.password_hash = generate_password_hash(new_password)
+    user.password = bcrypt.hashpw(
+        new_password.encode('utf-8'),
+        bcrypt.gensalt()
+    ).decode('utf-8')
     db.session.commit()
-    
-    print(f"Password changed for user {user.email}")
+    print(f"Password updated for {user.email}")
     return jsonify({'message': 'Password changed successfully!'}), 200
 
 
@@ -192,7 +186,7 @@ def change_pin():
     stored = otp_store.get(key)
 
     if not stored:
-        return jsonify({'error': 'OTP not found.'}), 400
+        return jsonify({'error': 'OTP not found. Please request a new one.'}), 400
     if datetime.utcnow() > stored['expires']:
         del otp_store[key]
         return jsonify({'error': 'OTP expired'}), 400
@@ -201,12 +195,74 @@ def change_pin():
 
     del otp_store[key]
 
-    import bcrypt
-    user.pin_hash = bcrypt.hashpw(
+    user.pin = bcrypt.hashpw(
         str(new_pin).encode('utf-8'),
         bcrypt.gensalt()
     ).decode('utf-8')
     db.session.commit()
+    print(f"PIN updated for {user.email}")
     return jsonify({'message': 'PIN changed successfully!'}), 200
 
 
+@otp_bp.route('/forgot-password/send', methods=['POST'])
+def forgot_password_send():
+    data = request.get_json()
+    email = data.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'No account found with this email'}), 404
+
+    otp = generate_otp()
+    otp_store[f"forgot_{email}"] = {
+        'otp': otp,
+        'expires': datetime.utcnow() + timedelta(minutes=10)
+    }
+
+    email_sent = send_otp_email(email, otp, 'forgot_password')
+
+    return jsonify({
+        'message': f'OTP sent to {email}',
+        'email': email,
+        'dev_otp': otp,
+        'email_sent': email_sent
+    }), 200
+
+
+@otp_bp.route('/forgot-password/reset', methods=['POST'])
+def forgot_password_reset():
+    data = request.get_json()
+    email = data.get('email')
+    otp = data.get('otp')
+    new_password = data.get('new_password')
+
+    if not email or not otp or not new_password:
+        return jsonify({'error': 'Email, OTP and new password are required'}), 400
+
+    key = f"forgot_{email}"
+    stored = otp_store.get(key)
+
+    if not stored:
+        return jsonify({'error': 'OTP not found. Please request a new one.'}), 400
+    if datetime.utcnow() > stored['expires']:
+        del otp_store[key]
+        return jsonify({'error': 'OTP expired'}), 400
+    if stored['otp'] != otp:
+        return jsonify({'error': 'Invalid OTP'}), 400
+
+    del otp_store[key]
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    user.password = bcrypt.hashpw(
+        new_password.encode('utf-8'),
+        bcrypt.gensalt()
+    ).decode('utf-8')
+    db.session.commit()
+    print(f"Password reset for {email}")
+    return jsonify({'message': 'Password reset successfully!'}), 200

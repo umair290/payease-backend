@@ -124,14 +124,11 @@ def send_otp():
         'expires': datetime.utcnow() + timedelta(minutes=10)
     }
 
-    # Try to send email
-    email_sent = send_otp_email(user.email, otp, purpose)
-
+    # Skip email sending - return OTP directly for demo
     return jsonify({
-        'message': f'OTP sent to {user.email}',
+        'message': f'OTP generated successfully',
         'email': user.email,
-        'dev_otp': otp,  # Remove in production
-        'email_sent': email_sent
+        'dev_otp': otp
     }), 200
 
 

@@ -118,19 +118,20 @@ def send_otp():
     if not purpose:
         return jsonify({'error': 'Purpose is required'}), 400
 
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
     otp = generate_otp()
     otp_store[f"{user_id}_{purpose}"] = {
         'otp': otp,
         'expires': datetime.utcnow() + timedelta(minutes=10)
     }
 
-    # Skip email sending - return OTP directly for demo
     return jsonify({
-        'message': f'OTP generated successfully',
+        'message': 'OTP generated successfully',
         'email': user.email,
         'dev_otp': otp
     }), 200
-
 
 @otp_bp.route('/verify', methods=['POST'])
 @jwt_required()

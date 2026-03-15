@@ -189,7 +189,8 @@ def lookup_wallet():
         'wallet_number': wallet_number,
         'kyc_verified': user.kyc_verified
     }), 200
-    @account_bp.route('/lookup-phone', methods=['POST'])
+
+@account_bp.route('/lookup-phone', methods=['POST'])
 @jwt_required()
 def lookup_by_phone():
     data = request.get_json()

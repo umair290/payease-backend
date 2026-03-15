@@ -20,7 +20,7 @@ class Config:
     CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET', 'sT4-evyiUqtJagfeeLnBiwx5pJE')
     # Email settings
     MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-    MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))
+    MAIL_PORT = int(os.environ.get('MAIL_PORT', 465))
     MAIL_USE_TLS = True
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME', 'zodumair@gmail.com')
     MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', 'cmyblzglplizawel')

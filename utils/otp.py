@@ -1,131 +1,54 @@
 import random
 import string
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from models.user import User
-from extensions import db
 
-otp_bp = Blueprint('otp', __name__)
+# Temporary storage for OTPs
+# In production this would be Redis or a database
 otp_store = {}
 
+
 def generate_otp():
-    return ''.join(random.choices(string.digits, k=6))
+    return "".join(random.choices(string.digits, k=6))
 
-@otp_bp.route('/send', methods=['POST'])
-@jwt_required()
-def send_otp():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    data = request.get_json()
-    purpose = data.get('purpose')
 
-    if not purpose:
-        return jsonify({'error': 'Purpose is required'}), 400
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-
+def send_otp(phone, purpose="verification"):
     otp = generate_otp()
-    otp_store[f"{user_id}_{purpose}"] = {
-        'otp': otp,
-        'expires': datetime.utcnow() + timedelta(minutes=10)
+    expiry = datetime.utcnow() + timedelta(minutes=5)
+
+    # Store OTP with expiry
+    otp_store[phone] = {
+        "otp":     otp,
+        "expiry":  expiry,
+        "purpose": purpose,
+        "used":    False
     }
 
-    return jsonify({
-        'message': 'OTP generated successfully',
-        'email': user.email,
-        'dev_otp': otp
-    }), 200
+    # In development we print it
+    # In production this sends real SMS via Twilio
+    print(f"\n{'='*40}")
+    print(f"OTP for {phone}: {otp}")
+    print(f"Purpose: {purpose}")
+    print(f"Expires in 5 minutes")
+    print(f"{'='*40}\n")
+
+    return True
 
 
-@otp_bp.route('/verify', methods=['POST'])
-@jwt_required()
-def verify_otp():
-    user_id = get_jwt_identity()
-    data = request.get_json()
-    purpose = data.get('purpose')
-    otp = data.get('otp')
+def verify_otp(phone, otp):
+    record = otp_store.get(phone)
 
-    key = f"{user_id}_{purpose}"
-    stored = otp_store.get(key)
+    if not record:
+        return False, "OTP not found"
 
-    if not stored:
-        return jsonify({'error': 'OTP not found. Please request a new one.'}), 400
-    if datetime.utcnow() > stored['expires']:
-        del otp_store[key]
-        return jsonify({'error': 'OTP has expired.'}), 400
-    if stored['otp'] != otp:
-        return jsonify({'error': 'Invalid OTP.'}), 400
+    if record["used"]:
+        return False, "OTP already used"
 
-    del otp_store[key]
-    return jsonify({'message': 'OTP verified successfully!'}), 200
+    if datetime.utcnow() > record["expiry"]:
+        return False, "OTP expired"
 
+    if record["otp"] != otp:
+        return False, "Invalid OTP"
 
-@otp_bp.route('/change-password', methods=['POST'])
-@jwt_required()
-def change_password():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    data = request.get_json()
-    new_password = data.get('new_password')
-    otp = data.get('otp')
-
-    if not new_password or not otp:
-        return jsonify({'error': 'New password and OTP are required'}), 400
-
-    key = f"{user_id}_change_password"
-    stored = otp_store.get(key)
-
-    if not stored:
-        return jsonify({'error': 'OTP not found.'}), 400
-    if datetime.utcnow() > stored['expires']:
-        del otp_store[key]
-        return jsonify({'error': 'OTP expired'}), 400
-    if stored['otp'] != otp:
-        return jsonify({'error': 'Invalid OTP'}), 400
-
-    del otp_store[key]
-
-    import bcrypt
-    user.password_hash = bcrypt.hashpw(
-        new_password.encode('utf-8'),
-        bcrypt.gensalt()
-    ).decode('utf-8')
-    db.session.commit()
-    return jsonify({'message': 'Password changed successfully!'}), 200
-
-
-@otp_bp.route('/change-pin', methods=['POST'])
-@jwt_required()
-def change_pin():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    data = request.get_json()
-    new_pin = data.get('new_pin')
-    otp = data.get('otp')
-
-    if not new_pin or not otp:
-        return jsonify({'error': 'New PIN and OTP are required'}), 400
-    if len(str(new_pin)) != 4:
-        return jsonify({'error': 'PIN must be 4 digits'}), 400
-
-    key = f"{user_id}_change_pin"
-    stored = otp_store.get(key)
-
-    if not stored:
-        return jsonify({'error': 'OTP not found.'}), 400
-    if datetime.utcnow() > stored['expires']:
-        del otp_store[key]
-        return jsonify({'error': 'OTP expired'}), 400
-    if stored['otp'] != otp:
-        return jsonify({'error': 'Invalid OTP'}), 400
-
-    del otp_store[key]
-
-    import bcrypt
-    user.pin_hash = bcrypt.hashpw(
-        str(new_pin).encode('utf-8'),
-        bcrypt.gensalt()
-    ).decode('utf-8')
-    db.session.commit()
-    return jsonify({'message': 'PIN changed successfully!'}), 200
+    # Mark as used
+    otp_store[phone]["used"] = True
+    return True, "OTP verified successfully"

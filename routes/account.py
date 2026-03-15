@@ -166,3 +166,25 @@ def transaction_history():
         "total":         len(result),
         "transactions":  result
     }), 200
+@account_bp.route('/lookup', methods=['POST'])
+@jwt_required()
+def lookup_wallet():
+    data = request.get_json()
+    wallet_number = data.get('wallet_number')
+    
+    if not wallet_number:
+        return jsonify({'error': 'Wallet number required'}), 400
+    
+    wallet = Wallet.query.filter_by(wallet_number=wallet_number).first()
+    if not wallet:
+        return jsonify({'error': 'Wallet not found'}), 404
+    
+    user = User.query.get(wallet.user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify({
+        'full_name': user.full_name,
+        'phone': user.phone,
+        'wallet_number': wallet_number
+    }), 200

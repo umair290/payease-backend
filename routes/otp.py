@@ -142,6 +142,7 @@ def verify_otp():
 @otp_bp.route('/change-password', methods=['POST'])
 @jwt_required()
 def change_password():
+    import bcrypt
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     data = request.get_json()
@@ -164,12 +165,12 @@ def change_password():
 
     del otp_store[key]
 
-    import bcrypt
-    user.password_hash = bcrypt.hashpw(
-        new_password.encode('utf-8'),
-        bcrypt.gensalt()
-    ).decode('utf-8')
+    # Check how password is stored in auth
+    from werkzeug.security import generate_password_hash
+    user.password_hash = generate_password_hash(new_password)
     db.session.commit()
+    
+    print(f"Password changed for user {user.email}")
     return jsonify({'message': 'Password changed successfully!'}), 200
 
 

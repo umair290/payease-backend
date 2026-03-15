@@ -1,6 +1,6 @@
 from flask import Flask
 from config import config
-from extensions import db, jwt
+from extensions import db, jwt, mail
 from flask_cors import CORS
 from models import User, Wallet, Transaction, Bill, KYC
 import os
@@ -18,6 +18,7 @@ def create_app(config_name="default"):
     
     # Initialize extensions
     db.init_app(app)
+    mail.init_app(app)
     jwt.init_app(app)
     
     # Import and register blueprints

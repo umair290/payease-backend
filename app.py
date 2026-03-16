@@ -41,6 +41,16 @@ def create_app(config_name="default"):
     # Create all database tables
     with app.app_context():
         db.create_all()
+        # Add new KYC columns if they don't exist
+        try:
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN full_name_on_card VARCHAR(100)'))
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN date_of_birth VARCHAR(20)'))
+                conn.commit()
+                print("KYC columns added!")
+        except Exception as e:
+            print(f"Columns may already exist: {e}")
         print("Database ready!")
     
     return app

@@ -4,6 +4,7 @@ from extensions import db, jwt
 from flask_cors import CORS
 from models import User, Wallet, Transaction, Bill, KYC
 import os
+from routes.otp import otp_bp
 
 def create_app(config_name="default"):
     app = Flask(__name__)
@@ -27,6 +28,7 @@ def create_app(config_name="default"):
     from routes.admin import admin_bp
     from routes.bills import bills_bp
     from routes.otp import otp_bp
+    from routes.notifications import notifications_bp
     
     app.register_blueprint(auth_bp,    url_prefix="/api/auth")
     app.register_blueprint(account_bp, url_prefix="/api/account")
@@ -34,6 +36,7 @@ def create_app(config_name="default"):
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(bills_bp, url_prefix="/api/bills")
     app.register_blueprint(otp_bp, url_prefix="/api/otp")
+    app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
     
     # Create all database tables
     with app.app_context():

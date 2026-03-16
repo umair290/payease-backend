@@ -50,6 +50,18 @@ def deposit():
         db.session.add(txn)
         db.session.commit()
 
+        # Notification for deposit
+        try:
+            from routes.notifications import add_notification
+            add_notification(
+                user_id,
+                '💰 Deposit Successful',
+                f'PKR {amount:,.0f} deposited to your wallet',
+                'success', 'deposit'
+            )
+        except Exception as notif_err:
+            print(f"Notification error: {notif_err}")
+
         return jsonify({
             "message":     "Deposit successful!",
             "new_balance": round(wallet.balance, 2)
@@ -80,8 +92,9 @@ def send_money():
     if amount <= 0:
         return jsonify({"error": "Amount must be greater than zero"}), 400
 
-    user   = User.query.get(user_id)
-    sender = Wallet.query.filter_by(user_id=user_id).first()
+    user        = User.query.get(user_id)
+    sender      = Wallet.query.filter_by(user_id=user_id).first()
+    sender_user = User.query.get(user_id)
 
     # Verify PIN
     if not bcrypt.checkpw(
@@ -98,11 +111,11 @@ def send_money():
     if not user.kyc_verified:
         return jsonify({"error": "KYC verification required for transfers"}), 403
 
-    receiver = Wallet.query.filter_by(
+    receiver_wallet = Wallet.query.filter_by(
         wallet_number=to_wallet_number
     ).first()
 
-    if not receiver:
+    if not receiver_wallet:
         return jsonify({"error": "Recipient wallet not found"}), 404
 
     if sender.wallet_number == to_wallet_number:
@@ -111,9 +124,12 @@ def send_money():
     if sender.balance < amount:
         return jsonify({"error": "Insufficient balance"}), 400
 
+    # Get receiver user
+    receiver_user = User.query.get(receiver_wallet.user_id)
+
     try:
-        sender.balance   -= amount
-        receiver.balance += amount
+        sender.balance          -= amount
+        receiver_wallet.balance += amount
 
         txn = Transaction(
             user_id     = user_id,
@@ -125,6 +141,26 @@ def send_money():
         )
         db.session.add(txn)
         db.session.commit()
+
+        # Notifications
+        try:
+            from routes.notifications import add_notification
+            # Sender notification
+            add_notification(
+                user_id,
+                '💸 Money Sent',
+                f'PKR {amount:,.0f} sent to {receiver_user.full_name} successfully',
+                'success', 'send'
+            )
+            # Receiver notification
+            add_notification(
+                receiver_wallet.user_id,
+                '💰 Money Received',
+                f'PKR {amount:,.0f} received from {sender_user.full_name}',
+                'success', 'receive'
+            )
+        except Exception as notif_err:
+            print(f"Notification error: {notif_err}")
 
         return jsonify({
             "message":     "Money sent successfully!",
@@ -166,53 +202,53 @@ def transaction_history():
         "total":         len(result),
         "transactions":  result
     }), 200
+
+
 @account_bp.route('/lookup', methods=['POST'])
 @jwt_required()
 def lookup_wallet():
     data = request.get_json()
     wallet_number = data.get('wallet_number')
-    
+
     if not wallet_number:
         return jsonify({'error': 'Wallet number required'}), 400
-    
+
     wallet = Wallet.query.filter_by(wallet_number=wallet_number).first()
     if not wallet:
         return jsonify({'error': 'Wallet not found'}), 404
-    
+
     user = User.query.get(wallet.user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    
+
     return jsonify({
-        'full_name': user.full_name,
-        'phone': user.phone,
+        'full_name':     user.full_name,
+        'phone':         user.phone,
         'wallet_number': wallet_number,
-        'kyc_verified': user.kyc_verified
+        'kyc_verified':  user.kyc_verified
     }), 200
+
 
 @account_bp.route('/lookup-phone', methods=['POST'])
 @jwt_required()
 def lookup_by_phone():
     data = request.get_json()
     phone = data.get('phone')
-    
+
     if not phone:
         return jsonify({'error': 'Phone number required'}), 400
-    
+
     user = User.query.filter_by(phone=phone).first()
     if not user:
         return jsonify({'error': 'No account found with this phone number'}), 404
-    
+
     wallet = Wallet.query.filter_by(user_id=user.id).first()
     if not wallet:
         return jsonify({'error': 'Wallet not found'}), 404
-    
+
     return jsonify({
-        'full_name': user.full_name,
-        'phone': user.phone,
+        'full_name':     user.full_name,
+        'phone':         user.phone,
         'wallet_number': wallet.wallet_number,
-        'kyc_verified': user.kyc_verified
+        'kyc_verified':  user.kyc_verified
     }), 200
-
-
-

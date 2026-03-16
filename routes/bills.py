@@ -6,7 +6,6 @@ import bcrypt
 
 bills_bp = Blueprint("bills", __name__)
 
-#All supported providers
 PROVIDERS = {
     "electricity": ["LESCO", "KESC"],
     "gas": ["SSGC", "SNGPL"],
@@ -14,12 +13,9 @@ PROVIDERS = {
     "topup": ["Jazz", "Telenor", "Zong", "Ufone"]
 }
 
-#Getting Providers
 @bills_bp.route("/providers", methods=["GET"])
 def get_providers():
-    return jsonify({
-        "providers": PROVIDERS
-    }), 200
+    return jsonify({"providers": PROVIDERS}), 200
 
 
 @bills_bp.route("/pay", methods=["POST"])
@@ -34,7 +30,6 @@ def pay_bill():
     reference = data.get("reference")
     pin       = data.get("pin")
 
-    # Validate inputs
     if not all([bill_type, provider, amount, reference, pin]):
         return jsonify({"error": "All fields are required"}), 400
 
@@ -50,22 +45,18 @@ def pay_bill():
     user   = User.query.get(user_id)
     wallet = Wallet.query.filter_by(user_id=user_id).first()
 
-    # Verify PIN
     if not bcrypt.checkpw(
         pin.encode("utf-8"),
         user.pin.encode("utf-8")
     ):
         return jsonify({"error": "Incorrect PIN"}), 401
 
-    # Check balance
     if wallet.balance < amount:
         return jsonify({"error": "Insufficient balance"}), 400
 
     try:
-        # Deduct from wallet
         wallet.balance -= amount
 
-        # Record bill
         bill = Bill(
             user_id   = user_id,
             bill_type = bill_type,
@@ -77,7 +68,6 @@ def pay_bill():
         )
         db.session.add(bill)
 
-        # Record transaction
         txn = Transaction(
             user_id     = user_id,
             from_wallet = wallet.wallet_number,
@@ -88,6 +78,18 @@ def pay_bill():
         )
         db.session.add(txn)
         db.session.commit()
+
+        # ✅ Notification BEFORE return
+        try:
+            from routes.notifications import add_notification
+            add_notification(
+                user_id,
+                '✅ Bill Payment Successful',
+                f'PKR {amount:,.0f} paid for {provider} successfully',
+                'success', 'bill'
+            )
+        except Exception as notif_err:
+            print(f"Notification error: {notif_err}")
 
         return jsonify({
             "message":   "Bill paid successfully!",
@@ -107,7 +109,6 @@ def pay_bill():
 @jwt_required()
 def bill_history():
     user_id = get_jwt_identity()
-
     bills = Bill.query.filter_by(
         user_id=user_id
     ).order_by(Bill.created_at.desc()).all()

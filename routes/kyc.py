@@ -1,5 +1,4 @@
 import os
-import uuid
 import cloudinary
 import cloudinary.uploader
 from flask import Blueprint, request, jsonify
@@ -24,13 +23,12 @@ def upload_to_cloudinary(file):
     )
     return result['secure_url']
 
+
 @kyc_bp.route('/submit', methods=['POST'])
 @jwt_required()
 def submit_kyc():
     user_id = get_jwt_identity()
-    user = User.query.get(user_id)
 
-    # Check if KYC already submitted
     existing = KYC.query.filter_by(user_id=user_id).first()
     if existing:
         if existing.status == 'pending':
@@ -41,15 +39,15 @@ def submit_kyc():
             db.session.delete(existing)
             db.session.commit()
 
-    # Get form data
     cnic_number = request.form.get('cnic_number')
+    full_name_on_card = request.form.get('full_name_on_card', '')
+    date_of_birth = request.form.get('date_of_birth', '')
+
     if not cnic_number:
         return jsonify({'error': 'CNIC number is required'}), 400
-
     if len(cnic_number) != 13 or not cnic_number.isdigit():
         return jsonify({'error': 'CNIC must be 13 digits'}), 400
 
-    # Get files
     cnic_front = request.files.get('cnic_front')
     cnic_back = request.files.get('cnic_back')
     selfie = request.files.get('selfie')
@@ -58,15 +56,15 @@ def submit_kyc():
         return jsonify({'error': 'All documents are required'}), 400
 
     try:
-        # Upload to Cloudinary
         cnic_front_url = upload_to_cloudinary(cnic_front)
         cnic_back_url = upload_to_cloudinary(cnic_back)
         selfie_url = upload_to_cloudinary(selfie)
 
-        # Save KYC
         kyc = KYC(
             user_id=user_id,
             cnic_number=cnic_number,
+            full_name_on_card=full_name_on_card,
+            date_of_birth=date_of_birth,
             cnic_front=cnic_front_url,
             cnic_back=cnic_back_url,
             selfie=selfie_url,
@@ -93,6 +91,8 @@ def kyc_status():
     return jsonify({
         'status': kyc.status,
         'cnic_number': kyc.cnic_number,
+        'full_name_on_card': kyc.full_name_on_card,
+        'date_of_birth': kyc.date_of_birth,
         'rejection_reason': kyc.rejection_reason,
         'submitted_at': str(kyc.submitted_at),
         'verified_at': str(kyc.verified_at) if kyc.verified_at else None,

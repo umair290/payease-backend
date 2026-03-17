@@ -528,7 +528,7 @@ def submit_change_request():
     if not field or not value or not reason:
         return jsonify({"error": "Field, value, and reason are required"}), 400
 
-    allowed_fields = ["date_of_birth", "cnic_number", "full_name_on_card"]
+    allowed_fields = ["date_of_birth", "cnic_number", "full_name_on_card", "full_name", "phone"]
     if field not in allowed_fields:
         return jsonify({"error": f"Field '{field}' cannot be changed via request"}), 400
 

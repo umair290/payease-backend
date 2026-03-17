@@ -629,19 +629,31 @@ def reject_change_request():
 def update_user_field(user_id, field, value):
     """Helper to update a single user field"""
     try:
-        kyc = KYC.query.filter_by(user_id=user_id).first()
-        if field == "date_of_birth" and kyc:
+        user = User.query.get(user_id)
+        kyc  = KYC.query.filter_by(user_id=user_id).first()
+
+        if field == "full_name" and user:
+            user.full_name = value
+        elif field == "phone" and user:
+            # Check uniqueness
+            existing = User.query.filter_by(phone=value).first()
+            if existing and existing.id != int(user_id):
+                return False
+            user.phone = value
+        elif field == "date_of_birth" and kyc:
             kyc.date_of_birth = value
         elif field == "cnic_number" and kyc:
             kyc.cnic_number = value
         elif field == "full_name_on_card" and kyc:
             kyc.full_name_on_card = value
+
         db.session.commit()
         return True
     except Exception as e:
         db.session.rollback()
         print(f"Update field error: {e}")
         return False
+
 
 
 @admin_bp.route("/kyc/pending", methods=["GET"])

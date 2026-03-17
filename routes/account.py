@@ -318,7 +318,8 @@ def get_balance():
         "email":         user.email,
         "phone":         user.phone,
         "wallet_number": wallet.wallet_number,
-        "balance":       round(wallet.balance, 2)
+        "balance":       round(wallet.balance, 2),
+        "kyc_verified":  user.kyc_verified
     }), 200
 
 

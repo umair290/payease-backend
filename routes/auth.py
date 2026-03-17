@@ -347,13 +347,16 @@ def login():
     except Exception as e:
         print(f"Device detection error: {e}")
 
-    # ── Log the login with full details ──
+    # ── Log the login with full details including location ──
     try:
-        ua_short = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
+        ua_short  = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
+        latitude  = data.get("latitude", "")
+        longitude = data.get("longitude", "")
+        location_str = f"Location: {latitude}, {longitude} — " if latitude and longitude else ""
         add_log(
             user.id,
             'User Login',
-            f'Logged in — IP: {ip_address} — Device: {ua_short} — {now_str}'
+            f'Logged in — IP: {ip_address} — {location_str}Device: {ua_short} — {now_str}'
         )
     except Exception as e:
         print(f"Login log error: {e}")

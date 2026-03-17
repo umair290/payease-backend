@@ -10,6 +10,7 @@ import re
 import resend
 import hashlib
 from datetime import datetime, timedelta
+from routes.admin import add_log
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -34,6 +35,12 @@ def is_valid_email_syntax(email):
     return re.match(pattern, email) is not None
 
 
+def get_ip(req):
+    """Helper to extract real IP from request"""
+    ip = req.headers.get('X-Forwarded-For', req.remote_addr or 'Unknown')
+    return ip.split(',')[0].strip()
+
+
 def send_registration_otp_email(email, otp, full_name):
     html_body = f'''<!DOCTYPE html>
 <html>
@@ -44,10 +51,10 @@ def send_registration_otp_email(email, otp, full_name):
 <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 <tr><td style="background:linear-gradient(135deg,#1A73E8,#0052CC);padding:32px;text-align:center;">
 <p style="color:#fff;font-size:32px;font-weight:bold;margin:0;">PayEase</p>
-<p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet & Payment Services</p>
+<p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet and Payment Services</p>
 </td></tr>
 <tr><td style="padding:36px 40px;">
-<h2 style="color:#1A1A2E;font-size:22px;font-weight:bold;margin:0 0 8px 0;">Welcome, {full_name}! 👋</h2>
+<h2 style="color:#1A1A2E;font-size:22px;font-weight:bold;margin:0 0 8px 0;">Welcome, {full_name}!</h2>
 <p style="color:#888;font-size:14px;margin:0 0 28px 0;line-height:1.6;">
 Thank you for joining PayEase! Please verify your email address to complete your registration.
 Use the OTP below — it expires in <strong>5 minutes</strong>.
@@ -56,12 +63,12 @@ Use the OTP below — it expires in <strong>5 minutes</strong>.
 <tr><td style="background:#F0F4FF;border:2px dashed #1A73E8;border-radius:16px;padding:28px;text-align:center;">
 <p style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin:0 0 12px 0;">Verification Code</p>
 <p style="color:#1A73E8;font-size:52px;font-weight:bold;letter-spacing:16px;margin:0;font-family:monospace;">{otp}</p>
-<p style="color:#FF4444;font-size:12px;font-weight:600;margin:12px 0 0 0;">⏱ Expires in 5 minutes</p>
+<p style="color:#FF4444;font-size:12px;font-weight:600;margin:12px 0 0 0;">Expires in 5 minutes</p>
 </td></tr>
 </table>
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;">
 <tr><td style="background:#FFF8F0;border:1px solid #FFE0B2;border-radius:12px;padding:16px;">
-<p style="color:#FF8C00;font-size:12px;font-weight:700;margin:0 0 4px 0;">🔒 Security Notice</p>
+<p style="color:#FF8C00;font-size:12px;font-weight:700;margin:0 0 4px 0;">Security Notice</p>
 <p style="color:#888;font-size:12px;margin:0;line-height:1.5;">
 Never share this code with anyone. PayEase will never ask for your OTP via phone or chat.
 </p>
@@ -70,7 +77,7 @@ Never share this code with anyone. PayEase will never ask for your OTP via phone
 </td></tr>
 <tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:20px 40px;text-align:center;">
 <p style="color:#1A73E8;font-size:16px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
-<p style="color:#AAB0C0;font-size:11px;margin:0;">© 2026 PayEase Digital Wallet. All rights reserved.</p>
+<p style="color:#AAB0C0;font-size:11px;margin:0;">2026 PayEase Digital Wallet. All rights reserved.</p>
 <p style="color:#AAB0C0;font-size:11px;margin:4px 0 0 0;">payease.space</p>
 </td></tr>
 </table>
@@ -92,9 +99,7 @@ Never share this code with anyone. PayEase will never ask for your OTP via phone
 
 
 def send_new_device_email(email, full_name, ip_address, user_agent):
-    """Send new device login alert email"""
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-    # Shorten user agent for display
+    now      = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     ua_short = user_agent[:80] + '...' if len(user_agent) > 80 else user_agent
 
     html_body = f'''<!DOCTYPE html>
@@ -104,64 +109,44 @@ def send_new_device_email(email, full_name, ip_address, user_agent):
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-
 <tr><td style="background:linear-gradient(135deg,#DC2626,#B91C1C);padding:28px;text-align:center;">
 <p style="color:#fff;font-size:28px;font-weight:bold;margin:0;">PayEase</p>
 <p style="color:rgba(255,255,255,0.75);font-size:13px;margin:6px 0 0 0;">Security Alert</p>
 </td></tr>
-
 <tr><td style="padding:28px 32px;">
-<div style="width:56px;height:56px;border-radius:50%;background:#FEE2E2;display:flex;align-items:center;justify-content:center;margin:0 0 16px 0;font-size:28px;">⚠️</div>
 <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 8px 0;">New Device Login Detected</h2>
 <p style="color:#666;font-size:14px;margin:0 0 20px 0;line-height:1.6;">
 Hi <strong>{full_name}</strong>, your PayEase account was accessed from a new device or browser.
 </p>
-
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFF;border-radius:14px;overflow:hidden;border:1px solid #E0E6F0;margin-bottom:20px;">
 <tr style="background:#EEF2FF;">
   <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#1A73E8;text-transform:uppercase;letter-spacing:0.5px;">Login Details</td>
 </tr>
 <tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;width:120px;">📅 Time</td>
+  <td style="padding:10px 16px;font-size:13px;color:#888;width:120px;">Date and Time</td>
   <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;">{now}</td>
 </tr>
 <tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">🌐 IP Address</td>
+  <td style="padding:10px 16px;font-size:13px;color:#888;">IP Address</td>
   <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;">{ip_address}</td>
 </tr>
 <tr>
-  <td style="padding:10px 16px;font-size:13px;color:#888;">💻 Device</td>
+  <td style="padding:10px 16px;font-size:13px;color:#888;">Device</td>
   <td style="padding:10px 16px;font-size:12px;color:#1A1A2E;">{ua_short}</td>
 </tr>
 </table>
-
-<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
-<tr>
-<td style="background:#DCFCE7;border:1px solid #BBF7D0;border-radius:12px;padding:14px 16px;width:48%;">
-  <p style="color:#15803D;font-size:12px;font-weight:700;margin:0 0 4px 0;">✅ Was this you?</p>
-  <p style="color:#166534;font-size:12px;margin:0;line-height:1.4;">No action needed. You're all good!</p>
-</td>
-<td style="width:4%;"></td>
-<td style="background:#FEE2E2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px;width:48%;">
-  <p style="color:#DC2626;font-size:12px;font-weight:700;margin:0 0 4px 0;">❌ Wasn't you?</p>
-  <p style="color:#991B1B;font-size:12px;margin:0;line-height:1.4;">Change your password immediately!</p>
-</td>
-</tr>
-</table>
-
 <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:14px 16px;">
-<p style="color:#C2410C;font-size:12px;font-weight:700;margin:0 0 4px 0;">🔒 Security Tip</p>
+<p style="color:#C2410C;font-size:12px;font-weight:700;margin:0 0 4px 0;">Security Tip</p>
 <p style="color:#9A3412;font-size:12px;margin:0;line-height:1.5;">
-Never share your password or PIN with anyone. PayEase support will never ask for these details.
+If this was not you, change your password immediately from your profile settings.
+Never share your password or PIN with anyone.
 </p>
 </div>
 </td></tr>
-
 <tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:16px 32px;text-align:center;">
 <p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
-<p style="color:#AAB0C0;font-size:11px;margin:0;">payease.space · support@payease.space</p>
+<p style="color:#AAB0C0;font-size:11px;margin:0;">payease.space</p>
 </td></tr>
-
 </table>
 </td></tr>
 </table>
@@ -172,7 +157,7 @@ Never share your password or PIN with anyone. PayEase support will never ask for
         resend.Emails.send({
             "from":    f"PayEase Security <{SENDER_EMAIL}>",
             "to":      [email],
-            "subject": "⚠️ PayEase — New Device Login Detected",
+            "subject": "PayEase — New Device Login Detected",
             "html":    html_body,
         })
         return True
@@ -227,7 +212,7 @@ def initiate_register():
     }), 200
 
 
-# ── STEP 2: Verify OTP & Complete Registration ──
+# ── STEP 2: Verify OTP and Complete Registration ──
 @auth_bp.route("/register/verify", methods=["POST"])
 def verify_and_register():
     data = request.get_json()
@@ -270,6 +255,19 @@ def verify_and_register():
         )
         db.session.add(wallet)
         db.session.commit()
+
+        # ── Log new account creation with IP ──
+        try:
+            ip = get_ip(request)
+            now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
+            add_log(
+                user.id,
+                'Account Created',
+                f'New account registered — Email: {email} — IP: {ip} — {now}'
+            )
+        except Exception as e:
+            print(f"Registration log error: {e}")
+
         del registration_otp_store[email]
 
         return jsonify({
@@ -295,8 +293,8 @@ def resend_registration_otp():
     if not stored:
         return jsonify({"error": "No pending registration found"}), 400
 
-    otp             = generate_otp()
-    stored["otp"]   = otp
+    otp               = generate_otp()
+    stored["otp"]     = otp
     stored["expires"] = datetime.utcnow() + timedelta(minutes=5)
 
     email_sent = send_registration_otp_email(email, otp, stored["full_name"])
@@ -306,7 +304,7 @@ def resend_registration_otp():
     }), 200
 
 
-# ── LOGIN with New Device Detection ──
+# ── LOGIN with New Device Detection and Logging ──
 @auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -326,23 +324,15 @@ def login():
     if user.is_blocked:
         return jsonify({"error": "Account is blocked. Contact support."}), 403
 
+    # ── Get IP and User Agent ──
+    ip_address = get_ip(request)
+    user_agent = request.headers.get('User-Agent', 'Unknown Device')
+    now_str    = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
+
     # ── New Device Detection ──
     try:
-        user_agent   = request.headers.get('User-Agent', 'Unknown Device')
-        ip_address   = request.headers.get('X-Forwarded-For', request.remote_addr or 'Unknown')
-        ip_address   = ip_address.split(',')[0].strip()
-        device_hash  = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
-        last_device  = user.last_device_hash
-
-        print(f"=== DEVICE DEBUG ===")
-        print(f"User: {user.email}")
-        print(f"IP: {ip_address}")
-        print(f"UA: {user_agent[:50]}")
-        print(f"New hash: {device_hash}")
-        print(f"Old hash: {last_device}")
-        print(f"Is new device: {last_device is not None and last_device != device_hash}")
-        print(f"===================")
-
+        device_hash = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
+        last_device = user.last_device_hash
         is_new_device = last_device is not None and last_device != device_hash
 
         user.last_device_hash = device_hash
@@ -350,13 +340,23 @@ def login():
 
         if is_new_device and not user.is_admin:
             try:
-                result = send_new_device_email(user.email, user.full_name, ip_address, user_agent)
-                print(f"Email sent result: {result}")
+                send_new_device_email(user.email, user.full_name, ip_address, user_agent)
             except Exception as e:
                 print(f"New device email error: {e}")
 
     except Exception as e:
         print(f"Device detection error: {e}")
+
+    # ── Log the login with full details ──
+    try:
+        ua_short = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
+        add_log(
+            user.id,
+            'User Login',
+            f'Logged in — IP: {ip_address} — Device: {ua_short} — {now_str}'
+        )
+    except Exception as e:
+        print(f"Login log error: {e}")
 
     access_token = create_access_token(identity=str(user.id))
     return jsonify({

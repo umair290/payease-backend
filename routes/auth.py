@@ -8,16 +8,17 @@ import string
 import os
 import re
 import resend
+import hashlib
 from datetime import datetime, timedelta
 
 auth_bp = Blueprint("auth", __name__)
 
-# ── OTP Store (in-memory, use Redis in production) ──
+# ── OTP Store ──
 registration_otp_store = {}
 
 # ── Resend setup ──
 resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'noreply@payease.space')
+SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 
 def generate_wallet_number():
@@ -25,18 +26,15 @@ def generate_wallet_number():
 
 
 def generate_otp():
-    """Generate a 6-digit OTP"""
     return ''.join(random.choices(string.digits, k=6))
 
 
 def is_valid_email_syntax(email):
-    """Check if email has valid syntax"""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
 
 def send_registration_otp_email(email, otp, full_name):
-    """Send OTP email via Resend"""
     html_body = f'''<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -44,19 +42,16 @@ def send_registration_otp_email(email, otp, full_name):
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-
 <tr><td style="background:linear-gradient(135deg,#1A73E8,#0052CC);padding:32px;text-align:center;">
-<p style="color:#fff;font-size:32px;font-weight:bold;margin:0;letter-spacing:-0.5px;">PayEase</p>
+<p style="color:#fff;font-size:32px;font-weight:bold;margin:0;">PayEase</p>
 <p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet & Payment Services</p>
 </td></tr>
-
 <tr><td style="padding:36px 40px;">
 <h2 style="color:#1A1A2E;font-size:22px;font-weight:bold;margin:0 0 8px 0;">Welcome, {full_name}! 👋</h2>
 <p style="color:#888;font-size:14px;margin:0 0 28px 0;line-height:1.6;">
 Thank you for joining PayEase! Please verify your email address to complete your registration.
 Use the OTP below — it expires in <strong>5 minutes</strong>.
 </p>
-
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="background:#F0F4FF;border:2px dashed #1A73E8;border-radius:16px;padding:28px;text-align:center;">
 <p style="color:#888;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin:0 0 12px 0;">Verification Code</p>
@@ -64,22 +59,107 @@ Use the OTP below — it expires in <strong>5 minutes</strong>.
 <p style="color:#FF4444;font-size:12px;font-weight:600;margin:12px 0 0 0;">⏱ Expires in 5 minutes</p>
 </td></tr>
 </table>
-
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;">
 <tr><td style="background:#FFF8F0;border:1px solid #FFE0B2;border-radius:12px;padding:16px;">
 <p style="color:#FF8C00;font-size:12px;font-weight:700;margin:0 0 4px 0;">🔒 Security Notice</p>
 <p style="color:#888;font-size:12px;margin:0;line-height:1.5;">
 Never share this code with anyone. PayEase will never ask for your OTP via phone or chat.
-If you did not create this account, please ignore this email.
 </p>
 </td></tr>
 </table>
 </td></tr>
-
 <tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:20px 40px;text-align:center;">
 <p style="color:#1A73E8;font-size:16px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
 <p style="color:#AAB0C0;font-size:11px;margin:0;">© 2026 PayEase Digital Wallet. All rights reserved.</p>
 <p style="color:#AAB0C0;font-size:11px;margin:4px 0 0 0;">payease.space</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>'''
+    try:
+        resend.Emails.send({
+            "from":    f"PayEase <{SENDER_EMAIL}>",
+            "to":      [email],
+            "subject": "PayEase — Verify Your Email Address",
+            "html":    html_body,
+        })
+        return True
+    except Exception as e:
+        print(f"Email sending failed: {str(e)}")
+        return False
+
+
+def send_new_device_email(email, full_name, ip_address, user_agent):
+    """Send new device login alert email"""
+    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+    # Shorten user agent for display
+    ua_short = user_agent[:80] + '...' if len(user_agent) > 80 else user_agent
+
+    html_body = f'''<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F0F4FF;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
+<tr><td align="center">
+<table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+<tr><td style="background:linear-gradient(135deg,#DC2626,#B91C1C);padding:28px;text-align:center;">
+<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;">PayEase</p>
+<p style="color:rgba(255,255,255,0.75);font-size:13px;margin:6px 0 0 0;">Security Alert</p>
+</td></tr>
+
+<tr><td style="padding:28px 32px;">
+<div style="width:56px;height:56px;border-radius:50%;background:#FEE2E2;display:flex;align-items:center;justify-content:center;margin:0 0 16px 0;font-size:28px;">⚠️</div>
+<h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 8px 0;">New Device Login Detected</h2>
+<p style="color:#666;font-size:14px;margin:0 0 20px 0;line-height:1.6;">
+Hi <strong>{full_name}</strong>, your PayEase account was accessed from a new device or browser.
+</p>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFF;border-radius:14px;overflow:hidden;border:1px solid #E0E6F0;margin-bottom:20px;">
+<tr style="background:#EEF2FF;">
+  <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#1A73E8;text-transform:uppercase;letter-spacing:0.5px;">Login Details</td>
+</tr>
+<tr style="border-bottom:1px solid #E0E6F0;">
+  <td style="padding:10px 16px;font-size:13px;color:#888;width:120px;">📅 Time</td>
+  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;">{now}</td>
+</tr>
+<tr style="border-bottom:1px solid #E0E6F0;">
+  <td style="padding:10px 16px;font-size:13px;color:#888;">🌐 IP Address</td>
+  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;">{ip_address}</td>
+</tr>
+<tr>
+  <td style="padding:10px 16px;font-size:13px;color:#888;">💻 Device</td>
+  <td style="padding:10px 16px;font-size:12px;color:#1A1A2E;">{ua_short}</td>
+</tr>
+</table>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+<tr>
+<td style="background:#DCFCE7;border:1px solid #BBF7D0;border-radius:12px;padding:14px 16px;width:48%;">
+  <p style="color:#15803D;font-size:12px;font-weight:700;margin:0 0 4px 0;">✅ Was this you?</p>
+  <p style="color:#166534;font-size:12px;margin:0;line-height:1.4;">No action needed. You're all good!</p>
+</td>
+<td style="width:4%;"></td>
+<td style="background:#FEE2E2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px;width:48%;">
+  <p style="color:#DC2626;font-size:12px;font-weight:700;margin:0 0 4px 0;">❌ Wasn't you?</p>
+  <p style="color:#991B1B;font-size:12px;margin:0;line-height:1.4;">Change your password immediately!</p>
+</td>
+</tr>
+</table>
+
+<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:14px 16px;">
+<p style="color:#C2410C;font-size:12px;font-weight:700;margin:0 0 4px 0;">🔒 Security Tip</p>
+<p style="color:#9A3412;font-size:12px;margin:0;line-height:1.5;">
+Never share your password or PIN with anyone. PayEase support will never ask for these details.
+</p>
+</div>
+</td></tr>
+
+<tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:16px 32px;text-align:center;">
+<p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
+<p style="color:#AAB0C0;font-size:11px;margin:0;">payease.space · support@payease.space</p>
 </td></tr>
 
 </table>
@@ -90,26 +170,20 @@ If you did not create this account, please ignore this email.
 
     try:
         resend.Emails.send({
-            "from": f"PayEase <{SENDER_EMAIL}>",
-            "to": [email],
-            "subject": "PayEase — Verify Your Email Address",
-            "html": html_body,
+            "from":    f"PayEase Security <{SENDER_EMAIL}>",
+            "to":      [email],
+            "subject": "⚠️ PayEase — New Device Login Detected",
+            "html":    html_body,
         })
         return True
     except Exception as e:
-        print(f"Email sending failed: {str(e)}")
+        print(f"New device email failed: {str(e)}")
         return False
 
 
 # ── STEP 1: Initiate Registration ──
 @auth_bp.route("/register/initiate", methods=["POST"])
 def initiate_register():
-    """
-    Step 1 of registration:
-    - Validate email syntax
-    - Check email not already registered
-    - Generate OTP and send via email
-    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -120,34 +194,20 @@ def initiate_register():
     password  = data.get("password", "")
     pin       = data.get("pin", "")
 
-    # Validate required fields
     if not all([full_name, email, phone, password, pin]):
         return jsonify({"error": "All fields are required"}), 400
-
-    # Validate PIN
     if len(pin) != 4 or not pin.isdigit():
         return jsonify({"error": "PIN must be 4 digits"}), 400
-
-    # Validate password length
     if len(password) < 6:
         return jsonify({"error": "Password must be at least 6 characters"}), 400
-
-    # Validate email syntax
     if not is_valid_email_syntax(email):
         return jsonify({"error": "Invalid email address format"}), 400
-
-    # Check if email already registered
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "Email already registered"}), 409
-
-    # Check if phone already registered
     if User.query.filter_by(phone=phone).first():
         return jsonify({"error": "Phone number already registered"}), 409
 
-    # Generate OTP
     otp = generate_otp()
-
-    # Store registration data + OTP temporarily
     registration_otp_store[email] = {
         "otp":       otp,
         "full_name": full_name,
@@ -159,26 +219,17 @@ def initiate_register():
         "verified":  False
     }
 
-    # Try to send OTP email
     email_sent = send_registration_otp_email(email, otp, full_name)
-
     return jsonify({
         "message":    f"Verification code sent to {email}",
         "email":      email,
         "email_sent": email_sent,
-        "dev_otp":    otp  # Remove in production
     }), 200
 
 
 # ── STEP 2: Verify OTP & Complete Registration ──
 @auth_bp.route("/register/verify", methods=["POST"])
 def verify_and_register():
-    """
-    Step 2 of registration:
-    - Verify OTP
-    - Create user account
-    - Create wallet
-    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -189,30 +240,18 @@ def verify_and_register():
     if not email or not otp:
         return jsonify({"error": "Email and OTP are required"}), 400
 
-    # Check OTP store
     stored = registration_otp_store.get(email)
-
     if not stored:
         return jsonify({"error": "No pending registration found. Please start over."}), 400
-
-    # Check expiry
     if datetime.utcnow() > stored["expires"]:
         del registration_otp_store[email]
         return jsonify({"error": "OTP has expired. Please register again."}), 400
-
-    # Check OTP
     if stored["otp"] != otp:
         return jsonify({"error": "Invalid OTP. Please try again."}), 400
 
-    # OTP verified — create user
     try:
-        hashed_password = bcrypt.hashpw(
-            stored["password"].encode("utf-8"), bcrypt.gensalt()
-        ).decode("utf-8")
-
-        hashed_pin = bcrypt.hashpw(
-            stored["pin"].encode("utf-8"), bcrypt.gensalt()
-        ).decode("utf-8")
+        hashed_password = bcrypt.hashpw(stored["password"].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        hashed_pin      = bcrypt.hashpw(stored["pin"].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
         user = User(
             full_name = stored["full_name"],
@@ -231,8 +270,6 @@ def verify_and_register():
         )
         db.session.add(wallet)
         db.session.commit()
-
-        # Clean up OTP store
         del registration_otp_store[email]
 
         return jsonify({
@@ -248,7 +285,6 @@ def verify_and_register():
 # ── RESEND OTP ──
 @auth_bp.route("/register/resend-otp", methods=["POST"])
 def resend_registration_otp():
-    """Resend OTP for registration"""
     data  = request.get_json()
     email = data.get("email", "").strip().lower()
 
@@ -259,21 +295,18 @@ def resend_registration_otp():
     if not stored:
         return jsonify({"error": "No pending registration found"}), 400
 
-    # Generate new OTP
-    otp = generate_otp()
-    stored["otp"]     = otp
+    otp             = generate_otp()
+    stored["otp"]   = otp
     stored["expires"] = datetime.utcnow() + timedelta(minutes=5)
 
     email_sent = send_registration_otp_email(email, otp, stored["full_name"])
-
     return jsonify({
         "message":    f"New OTP sent to {email}",
         "email_sent": email_sent,
-        "dev_otp":    otp
     }), 200
 
 
-# ── LOGIN ──
+# ── LOGIN with New Device Detection ──
 @auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -287,18 +320,38 @@ def login():
         return jsonify({"error": "Email and password are required"}), 400
 
     user = User.query.filter_by(email=email).first()
-
-    if not user or not bcrypt.checkpw(
-        password.encode("utf-8"),
-        user.password.encode("utf-8")
-    ):
+    if not user or not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
         return jsonify({"error": "Invalid email or password"}), 401
 
     if user.is_blocked:
         return jsonify({"error": "Account is blocked. Contact support."}), 403
 
-    access_token = create_access_token(identity=str(user.id))
+    # ── New Device Detection ──
+    try:
+        user_agent   = request.headers.get('User-Agent', 'Unknown Device')
+        ip_address   = request.headers.get('X-Forwarded-For', request.remote_addr or 'Unknown')
+        # Only use first IP if multiple (proxy chain)
+        ip_address   = ip_address.split(',')[0].strip()
+        device_hash  = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
+        last_device  = user.last_device_hash
+        is_new_device = last_device is not None and last_device != device_hash
 
+        # Update stored device hash
+        user.last_device_hash = device_hash
+        db.session.commit()
+
+        # Send alert for non-admin users on new device
+        if is_new_device and not user.is_admin:
+            try:
+                send_new_device_email(user.email, user.full_name, ip_address, user_agent)
+                print(f"New device alert sent to {user.email}")
+            except Exception as e:
+                print(f"New device email error: {e}")
+
+    except Exception as e:
+        print(f"Device detection error: {e}")
+
+    access_token = create_access_token(identity=str(user.id))
     return jsonify({
         "message":      "Login successful!",
         "access_token": access_token,
@@ -326,13 +379,13 @@ def setup_admin():
     hashed_pin      = bcrypt.hashpw('0000'.encode(), bcrypt.gensalt()).decode()
 
     admin = User(
-        full_name     = 'Admin',
-        email         = 'admin@payease.com',
-        phone         = '03000000000',
-        password      = hashed_password,
-        pin           = hashed_pin,
-        is_admin      = True,
-        kyc_verified  = True
+        full_name    = 'Admin',
+        email        = 'admin@payease.com',
+        phone        = '03000000000',
+        password     = hashed_password,
+        pin          = hashed_pin,
+        is_admin     = True,
+        kyc_verified = True
     )
     db.session.add(admin)
     db.session.flush()
@@ -344,5 +397,4 @@ def setup_admin():
     )
     db.session.add(wallet)
     db.session.commit()
-
     return jsonify({'message': 'Admin created successfully!'})

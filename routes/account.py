@@ -19,7 +19,6 @@ SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 # ──────────────────────────────────────────
 
 def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender_wallet, receiver_wallet_num):
-    """Send money sent confirmation to sender"""
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     html = f'''<!DOCTYPE html>
 <html>
@@ -28,61 +27,72 @@ def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sende
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
 <tr><td style="background:linear-gradient(135deg,#1A73E8,#0052CC);padding:28px;text-align:center;">
-<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;">PayEase</p>
-<p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet & Payment Services</p>
+<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;letter-spacing:-0.5px;">PayEase</p>
+<p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet and Payment Services</p>
 </td></tr>
-<tr><td style="padding:28px 32px 8px;">
-<div style="text-align:center;margin-bottom:20px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:#DCFCE7;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">💸</div>
-  <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">Money Sent Successfully!</h2>
-  <p style="color:#888;font-size:13px;margin:0;">Your transfer has been processed</p>
+
+<tr><td style="padding:32px;">
+<div style="text-align:center;margin-bottom:24px;">
+  <div style="width:64px;height:64px;border-radius:50%;background:#DBEAFE;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
+    <span style="font-size:28px;">&#10003;</span>
+  </div>
+  <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">Transfer Successful</h2>
+  <p style="color:#6B7280;font-size:13px;margin:0;">Your payment has been processed successfully.</p>
 </div>
-<div style="background:linear-gradient(135deg,#1A73E8,#0052CC);border-radius:16px;padding:20px;text-align:center;margin-bottom:20px;">
-  <p style="color:rgba(255,255,255,0.7);font-size:12px;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:1px;">Amount Sent</p>
-  <p style="color:#fff;font-size:36px;font-weight:bold;margin:0;">PKR {amount:,.0f}</p>
+
+<div style="background:linear-gradient(135deg,#1A73E8,#0052CC);border-radius:16px;padding:22px;text-align:center;margin-bottom:24px;">
+  <p style="color:rgba(255,255,255,0.75);font-size:11px;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">Amount Transferred</p>
+  <p style="color:#fff;font-size:38px;font-weight:bold;margin:0;letter-spacing:-1px;">PKR {amount:,.0f}</p>
 </div>
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFF;border-radius:14px;overflow:hidden;border:1px solid #E0E6F0;margin-bottom:20px;">
-<tr style="background:#EEF2FF;">
-  <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#1A73E8;text-transform:uppercase;letter-spacing:0.5px;">Transaction Details</td>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;margin-bottom:24px;">
+<tr style="background:#F3F4F6;">
+  <td colspan="2" style="padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.8px;">Transaction Details</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Sent To</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{receiver_user.full_name}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Sent To</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{receiver_user.full_name}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Receiver Wallet</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;font-family:monospace;">{receiver_wallet_num}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Recipient Wallet</td>
+  <td style="padding:12px 16px;font-size:12px;font-weight:600;color:#111827;text-align:right;font-family:monospace;">{receiver_wallet_num}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">From Wallet</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;font-family:monospace;">{sender_wallet}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">From Wallet</td>
+  <td style="padding:12px 16px;font-size:12px;font-weight:600;color:#111827;text-align:right;font-family:monospace;">{sender_wallet}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Reference</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A73E8;text-align:right;font-family:monospace;">{ref}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Reference No.</td>
+  <td style="padding:12px 16px;font-size:12px;font-weight:600;color:#1A73E8;text-align:right;font-family:monospace;">{ref}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Date & Time</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{now}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Date and Time</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{now}</td>
 </tr>
 <tr>
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Status</td>
-  <td style="padding:10px 16px;text-align:right;"><span style="background:#DCFCE7;color:#16A34A;font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;">✓ Completed</span></td>
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Status</td>
+  <td style="padding:12px 16px;text-align:right;">
+    <span style="background:#D1FAE5;color:#065F46;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px;">Completed</span>
+  </td>
 </tr>
 </table>
-<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:14px 16px;margin-bottom:20px;">
-<p style="color:#C2410C;font-size:12px;font-weight:700;margin:0 0 4px 0;">🔒 Didn't make this transfer?</p>
-<p style="color:#9A3412;font-size:12px;margin:0;line-height:1.5;">
-If you did not initiate this transfer, please change your PIN immediately and contact support at support@payease.space
+
+<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:16px;margin-bottom:8px;">
+<p style="color:#92400E;font-size:12px;font-weight:700;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.5px;">Security Notice</p>
+<p style="color:#78350F;font-size:13px;margin:0;line-height:1.6;">
+If you did not initiate this transfer, please change your PIN immediately and contact our support team at support@payease.space
 </p>
 </div>
 </td></tr>
-<tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:16px 32px;text-align:center;">
+
+<tr><td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 32px;text-align:center;">
 <p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
-<p style="color:#AAB0C0;font-size:11px;margin:0;">payease.space · support@payease.space</p>
-<p style="color:#AAB0C0;font-size:10px;margin:4px 0 0 0;">© 2026 PayEase Digital Wallet. All rights reserved.</p>
+<p style="color:#9CA3AF;font-size:11px;margin:0;">payease.space &nbsp;|&nbsp; support@payease.space</p>
+<p style="color:#9CA3AF;font-size:10px;margin:6px 0 0 0;">This is an automated message. Please do not reply to this email.</p>
 </td></tr>
+
 </table>
 </td></tr>
 </table>
@@ -92,16 +102,15 @@ If you did not initiate this transfer, please change your PIN immediately and co
         resend.Emails.send({
             "from":    f"PayEase <{SENDER_EMAIL}>",
             "to":      [sender_user.email],
-            "subject": f"✅ PKR {amount:,.0f} Sent to {receiver_user.full_name} — PayEase",
+            "subject": f"Transfer Confirmation — PKR {amount:,.0f} Sent to {receiver_user.full_name}",
             "html":    html,
         })
-        print(f"Sender email sent to {sender_user.email}")
+        print(f"Sender confirmation email sent to {sender_user.email}")
     except Exception as e:
         print(f"Sender email error: {e}")
 
 
 def send_transfer_email_to_receiver(sender_user, receiver_user, amount, ref, sender_wallet, receiver_wallet_num):
-    """Send money received notification to receiver"""
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     html = f'''<!DOCTYPE html>
 <html>
@@ -110,61 +119,72 @@ def send_transfer_email_to_receiver(sender_user, receiver_user, amount, ref, sen
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
 <tr><td style="background:linear-gradient(135deg,#16A34A,#15803D);padding:28px;text-align:center;">
-<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;">PayEase</p>
-<p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet & Payment Services</p>
+<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;letter-spacing:-0.5px;">PayEase</p>
+<p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet and Payment Services</p>
 </td></tr>
-<tr><td style="padding:28px 32px 8px;">
-<div style="text-align:center;margin-bottom:20px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:#DCFCE7;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">💰</div>
-  <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">Money Received!</h2>
-  <p style="color:#888;font-size:13px;margin:0;">Funds have been added to your wallet</p>
+
+<tr><td style="padding:32px;">
+<div style="text-align:center;margin-bottom:24px;">
+  <div style="width:64px;height:64px;border-radius:50%;background:#D1FAE5;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
+    <span style="font-size:28px;">&#8595;</span>
+  </div>
+  <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">Payment Received</h2>
+  <p style="color:#6B7280;font-size:13px;margin:0;">Funds have been credited to your PayEase wallet.</p>
 </div>
-<div style="background:linear-gradient(135deg,#16A34A,#15803D);border-radius:16px;padding:20px;text-align:center;margin-bottom:20px;">
-  <p style="color:rgba(255,255,255,0.7);font-size:12px;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:1px;">Amount Received</p>
-  <p style="color:#fff;font-size:36px;font-weight:bold;margin:0;">PKR {amount:,.0f}</p>
+
+<div style="background:linear-gradient(135deg,#16A34A,#15803D);border-radius:16px;padding:22px;text-align:center;margin-bottom:24px;">
+  <p style="color:rgba(255,255,255,0.75);font-size:11px;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">Amount Received</p>
+  <p style="color:#fff;font-size:38px;font-weight:bold;margin:0;letter-spacing:-1px;">PKR {amount:,.0f}</p>
 </div>
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFF;border-radius:14px;overflow:hidden;border:1px solid #E0E6F0;margin-bottom:20px;">
-<tr style="background:#F0FDF4;">
-  <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#16A34A;text-transform:uppercase;letter-spacing:0.5px;">Transaction Details</td>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;margin-bottom:24px;">
+<tr style="background:#F3F4F6;">
+  <td colspan="2" style="padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.8px;">Transaction Details</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Received From</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{sender_user.full_name}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Received From</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{sender_user.full_name}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Sender Wallet</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;font-family:monospace;">{sender_wallet}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Sender Wallet</td>
+  <td style="padding:12px 16px;font-size:12px;font-weight:600;color:#111827;text-align:right;font-family:monospace;">{sender_wallet}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Your Wallet</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;font-family:monospace;">{receiver_wallet_num}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Your Wallet</td>
+  <td style="padding:12px 16px;font-size:12px;font-weight:600;color:#111827;text-align:right;font-family:monospace;">{receiver_wallet_num}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Reference</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A73E8;text-align:right;font-family:monospace;">{ref}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Reference No.</td>
+  <td style="padding:12px 16px;font-size:12px;font-weight:600;color:#1A73E8;text-align:right;font-family:monospace;">{ref}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Date & Time</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{now}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Date and Time</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{now}</td>
 </tr>
 <tr>
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Status</td>
-  <td style="padding:10px 16px;text-align:right;"><span style="background:#DCFCE7;color:#16A34A;font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;">✓ Received</span></td>
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Status</td>
+  <td style="padding:12px 16px;text-align:right;">
+    <span style="background:#D1FAE5;color:#065F46;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px;">Credited</span>
+  </td>
 </tr>
 </table>
-<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:14px 16px;margin-bottom:20px;text-align:center;">
-<p style="color:#15803D;font-size:14px;font-weight:700;margin:0 0 4px 0;">🎉 Your wallet has been credited!</p>
+
+<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:16px;text-align:center;">
+<p style="color:#15803D;font-size:13px;font-weight:600;margin:0 0 4px 0;">Your wallet has been updated.</p>
 <p style="color:#166534;font-size:12px;margin:0;line-height:1.5;">
-Login to PayEase to view your updated balance and transaction history.
+Log in to PayEase to view your updated balance and full transaction history.
 </p>
 </div>
 </td></tr>
-<tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:16px 32px;text-align:center;">
+
+<tr><td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 32px;text-align:center;">
 <p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
-<p style="color:#AAB0C0;font-size:11px;margin:0;">payease.space · support@payease.space</p>
-<p style="color:#AAB0C0;font-size:10px;margin:4px 0 0 0;">© 2026 PayEase Digital Wallet. All rights reserved.</p>
+<p style="color:#9CA3AF;font-size:11px;margin:0;">payease.space &nbsp;|&nbsp; support@payease.space</p>
+<p style="color:#9CA3AF;font-size:10px;margin:6px 0 0 0;">This is an automated message. Please do not reply to this email.</p>
 </td></tr>
+
 </table>
 </td></tr>
 </table>
@@ -174,30 +194,31 @@ Login to PayEase to view your updated balance and transaction history.
         resend.Emails.send({
             "from":    f"PayEase <{SENDER_EMAIL}>",
             "to":      [receiver_user.email],
-            "subject": f"💰 PKR {amount:,.0f} Received from {sender_user.full_name} — PayEase",
+            "subject": f"Payment Received — PKR {amount:,.0f} from {sender_user.full_name}",
             "html":    html,
         })
-        print(f"Receiver email sent to {receiver_user.email}")
+        print(f"Receiver confirmation email sent to {receiver_user.email}")
     except Exception as e:
         print(f"Receiver email error: {e}")
 
 
 def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wallet, alert_type):
-    """Send fraud alert email"""
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
     if alert_type == 'large_transfer':
-        title    = '🚨 Large Transfer Alert'
+        title    = 'Large Transfer Alert'
         subtitle = f'A large transfer of PKR {amount:,.0f} was made from your account'
         color    = '#DC2626'
         grad     = 'linear-gradient(135deg,#DC2626,#B91C1C)'
-        message  = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> ({receiver_wallet}).<br><br>This is above our large transaction threshold of PKR 25,000. If this was you, no action is needed. If you did NOT make this transfer, please change your PIN and password immediately.'
+        subject  = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
+        message  = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This transaction exceeds our large transfer threshold of PKR 25,000. If you authorized this transfer, no further action is required. If you did not initiate this transfer, please change your PIN and password immediately and contact our support team.'
     else:
-        title    = '⚠️ Unusual Activity Detected'
-        subtitle = 'Multiple rapid transfers detected on your account'
+        title    = 'Unusual Activity Detected'
+        subtitle = 'Multiple rapid transfers have been detected on your account'
         color    = '#CA8A04'
-        grad     = 'linear-gradient(135deg,#CA8A04,#92400E)'
-        message  = f'We detected <strong>multiple transfers in under 5 minutes</strong> from your PayEase wallet. The latest transfer was <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If these transfers were made by you, no action is needed. If you did NOT make these transfers, please change your PIN and password immediately and contact our support team.'
+        grad     = 'linear-gradient(135deg,#B45309,#92400E)'
+        subject  = 'Unusual Activity Detected — PayEase Security Notice'
+        message  = f'Our system has detected <strong>multiple transfers within a short period</strong> from your PayEase account. The most recent transfer was <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If you made these transfers, no action is required. If you did not authorize these transactions, please change your PIN and password immediately and contact our support team at support@payease.space'
 
     html = f'''<!DOCTYPE html>
 <html>
@@ -206,58 +227,68 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
 <tr><td style="background:{grad};padding:28px;text-align:center;">
-<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;">PayEase</p>
+<p style="color:#fff;font-size:28px;font-weight:bold;margin:0;letter-spacing:-0.5px;">PayEase</p>
 <p style="color:rgba(255,255,255,0.75);font-size:13px;margin:6px 0 0 0;">Security Alert</p>
 </td></tr>
-<tr><td style="padding:28px 32px;">
-<div style="text-align:center;margin-bottom:20px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:#FEE2E2;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">🚨</div>
+
+<tr><td style="padding:32px;">
+<div style="text-align:center;margin-bottom:24px;">
+  <div style="width:64px;height:64px;border-radius:50%;background:#FEE2E2;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
+    <span style="font-size:28px;">&#9888;</span>
+  </div>
   <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">{title}</h2>
-  <p style="color:#888;font-size:13px;margin:0;">{subtitle}</p>
+  <p style="color:#6B7280;font-size:13px;margin:0;">{subtitle}</p>
 </div>
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFF;border-radius:14px;overflow:hidden;border:1px solid #E0E6F0;margin-bottom:20px;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;margin-bottom:24px;">
 <tr style="background:#FEF2F2;">
-  <td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:{color};text-transform:uppercase;letter-spacing:0.5px;">Alert Details</td>
+  <td colspan="2" style="padding:12px 16px;font-size:11px;font-weight:700;color:{color};text-transform:uppercase;letter-spacing:0.8px;">Alert Details</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Account</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{full_name}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Account Holder</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{full_name}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Amount</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:700;color:{color};text-align:right;">PKR {amount:,.0f}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Transaction Amount</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:700;color:{color};text-align:right;">PKR {amount:,.0f}</td>
 </tr>
-<tr style="border-bottom:1px solid #E0E6F0;">
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Sent To</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{receiver_name}</td>
+<tr style="border-bottom:1px solid #E5E7EB;">
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Recipient</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{receiver_name}</td>
 </tr>
 <tr>
-  <td style="padding:10px 16px;font-size:13px;color:#888;">Time</td>
-  <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1A1A2E;text-align:right;">{now}</td>
+  <td style="padding:12px 16px;font-size:13px;color:#6B7280;">Date and Time</td>
+  <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{now}</td>
 </tr>
 </table>
-<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:16px;margin-bottom:20px;">
-<p style="color:#92400E;font-size:14px;line-height:1.6;margin:0;">{message}</p>
+
+<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:18px;margin-bottom:24px;">
+<p style="color:#92400E;font-size:13px;line-height:1.7;margin:0;">{message}</p>
 </div>
-<table width="100%" cellpadding="0" cellspacing="0">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
 <tr>
-<td style="background:#FEE2E2;border:1px solid #FECACA;border-radius:12px;padding:14px;width:48%;">
-  <p style="color:#DC2626;font-size:12px;font-weight:700;margin:0 0 4px 0;">❌ Wasn't you?</p>
-  <p style="color:#991B1B;font-size:12px;margin:0;line-height:1.4;">Change your PIN & password immediately!</p>
+<td style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:16px;width:47%;vertical-align:top;">
+  <p style="color:#DC2626;font-size:12px;font-weight:700;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.5px;">Was not you?</p>
+  <p style="color:#7F1D1D;font-size:12px;margin:0;line-height:1.5;">Change your PIN and password immediately. Contact support at support@payease.space</p>
 </td>
-<td style="width:4%"></td>
-<td style="background:#DCFCE7;border:1px solid #BBF7D0;border-radius:12px;padding:14px;width:48%;">
-  <p style="color:#16A34A;font-size:12px;font-weight:700;margin:0 0 4px 0;">✅ Was you?</p>
-  <p style="color:#166534;font-size:12px;margin:0;line-height:1.4;">No action needed. Stay safe!</p>
+<td style="width:6%;"></td>
+<td style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:16px;width:47%;vertical-align:top;">
+  <p style="color:#16A34A;font-size:12px;font-weight:700;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.5px;">Was you?</p>
+  <p style="color:#14532D;font-size:12px;margin:0;line-height:1.5;">No action required. Your transaction has been processed successfully.</p>
 </td>
 </tr>
 </table>
 </td></tr>
-<tr><td style="background:#F8FAFF;border-top:1px solid #E0E6F0;padding:16px 32px;text-align:center;">
+
+<tr><td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 32px;text-align:center;">
 <p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
-<p style="color:#AAB0C0;font-size:11px;margin:0;">payease.space · support@payease.space</p>
+<p style="color:#9CA3AF;font-size:11px;margin:0;">payease.space &nbsp;|&nbsp; support@payease.space</p>
+<p style="color:#9CA3AF;font-size:10px;margin:6px 0 0 0;">This is an automated security alert. Please do not reply to this email.</p>
 </td></tr>
+
 </table>
 </td></tr>
 </table>
@@ -268,7 +299,7 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
         resend.Emails.send({
             "from":    f"PayEase Security <{SENDER_EMAIL}>",
             "to":      [email],
-            "subject": f"{title} — PayEase Security",
+            "subject": subject,
             "html":    html,
         })
         print(f"Fraud alert email sent to {email}")
@@ -320,10 +351,18 @@ def deposit():
         db.session.commit()
         try:
             from routes.notifications import add_notification
-            add_notification(user_id, '💰 Deposit Successful', f'PKR {amount:,.0f} deposited to your wallet', 'success', 'deposit')
+            add_notification(
+                user_id,
+                'Deposit Successful',
+                f'PKR {amount:,.0f} has been deposited to your wallet.',
+                'success', 'deposit'
+            )
         except Exception as e:
             print(f"Notification error: {e}")
-        return jsonify({"message": "Deposit successful!", "new_balance": round(wallet.balance, 2)}), 200
+        return jsonify({
+            "message":     "Deposit successful!",
+            "new_balance": round(wallet.balance, 2)
+        }), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
@@ -375,13 +414,14 @@ def send_money():
         if amount >= 25000:
             add_notification(
                 user_id,
-                '🚨 Large Transfer Alert',
-                f'A transfer of PKR {amount:,.0f} to {receiver_user.full_name} was initiated. If this wasn\'t you, change your PIN immediately.',
+                'Large Transfer Alert',
+                f'A transfer of PKR {amount:,.0f} to {receiver_user.full_name} was initiated from your account. If this was not you, change your PIN immediately.',
                 'warning', 'security'
             )
             send_fraud_alert_email(
                 user.email, user.full_name, amount,
-                receiver_user.full_name, to_wallet_number, 'large_transfer'
+                receiver_user.full_name, to_wallet_number,
+                'large_transfer'
             )
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
@@ -394,13 +434,14 @@ def send_money():
         if recent_count >= 3:
             add_notification(
                 user_id,
-                '⚠️ Unusual Activity Detected',
-                f'{recent_count + 1} transfers in under 5 minutes. If this wasn\'t you, contact support immediately.',
+                'Unusual Activity Detected',
+                f'{recent_count + 1} transfers have been made from your account in under 5 minutes. If this was not you, contact support immediately.',
                 'warning', 'security'
             )
             send_fraud_alert_email(
                 user.email, user.full_name, amount,
-                receiver_user.full_name, to_wallet_number, 'rapid_transfer'
+                receiver_user.full_name, to_wallet_number,
+                'rapid_transfer'
             )
 
     except Exception as fraud_err:
@@ -423,18 +464,34 @@ def send_money():
         db.session.add(txn)
         db.session.commit()
 
-        # ── In-app Notifications ──
+        # ── In-App Notifications ──
         try:
             from routes.notifications import add_notification
-            add_notification(user_id, '💸 Money Sent', f'PKR {amount:,.0f} sent to {receiver_user.full_name} successfully', 'success', 'send')
-            add_notification(receiver_wallet.user_id, '💰 Money Received', f'PKR {amount:,.0f} received from {sender_user.full_name}', 'success', 'receive')
+            add_notification(
+                user_id,
+                'Transfer Successful',
+                f'PKR {amount:,.0f} has been sent to {receiver_user.full_name} successfully.',
+                'success', 'send'
+            )
+            add_notification(
+                receiver_wallet.user_id,
+                'Payment Received',
+                f'PKR {amount:,.0f} has been received from {sender_user.full_name}.',
+                'success', 'receive'
+            )
         except Exception as e:
             print(f"Notification error: {e}")
 
         # ── Confirmation Emails ──
         try:
-            send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender.wallet_number, to_wallet_number)
-            send_transfer_email_to_receiver(sender_user, receiver_user, amount, ref, sender.wallet_number, to_wallet_number)
+            send_transfer_email_to_sender(
+                sender_user, receiver_user, amount, ref,
+                sender.wallet_number, to_wallet_number
+            )
+            send_transfer_email_to_receiver(
+                sender_user, receiver_user, amount, ref,
+                sender.wallet_number, to_wallet_number
+            )
         except Exception as e:
             print(f"Transfer email error: {e}")
 
@@ -463,10 +520,14 @@ def transaction_history():
     ).order_by(Transaction.created_at.desc()).all()
     result = []
     for txn in transactions:
-        txn_dict = txn.to_dict()
+        txn_dict            = txn.to_dict()
         txn_dict["direction"] = "credit" if txn.to_wallet == wallet.wallet_number else "debit"
         result.append(txn_dict)
-    return jsonify({"wallet_number": wallet.wallet_number, "total": len(result), "transactions": result}), 200
+    return jsonify({
+        "wallet_number": wallet.wallet_number,
+        "total":         len(result),
+        "transactions":  result
+    }), 200
 
 
 @account_bp.route('/lookup', methods=['POST'])
@@ -482,7 +543,12 @@ def lookup_wallet():
     user = User.query.get(wallet.user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify({'full_name': user.full_name, 'phone': user.phone, 'wallet_number': wallet_number, 'kyc_verified': user.kyc_verified}), 200
+    return jsonify({
+        'full_name':     user.full_name,
+        'phone':         user.phone,
+        'wallet_number': wallet_number,
+        'kyc_verified':  user.kyc_verified
+    }), 200
 
 
 @account_bp.route('/lookup-phone', methods=['POST'])
@@ -498,4 +564,9 @@ def lookup_by_phone():
     wallet = Wallet.query.filter_by(user_id=user.id).first()
     if not wallet:
         return jsonify({'error': 'Wallet not found'}), 404
-    return jsonify({'full_name': user.full_name, 'phone': user.phone, 'wallet_number': wallet.wallet_number, 'kyc_verified': user.kyc_verified}), 200
+    return jsonify({
+        'full_name':     user.full_name,
+        'phone':         user.phone,
+        'wallet_number': wallet.wallet_number,
+        'kyc_verified':  user.kyc_verified
+    }), 200

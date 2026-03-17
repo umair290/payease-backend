@@ -330,21 +330,28 @@ def login():
     try:
         user_agent   = request.headers.get('User-Agent', 'Unknown Device')
         ip_address   = request.headers.get('X-Forwarded-For', request.remote_addr or 'Unknown')
-        # Only use first IP if multiple (proxy chain)
         ip_address   = ip_address.split(',')[0].strip()
         device_hash  = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
         last_device  = user.last_device_hash
+
+        print(f"=== DEVICE DEBUG ===")
+        print(f"User: {user.email}")
+        print(f"IP: {ip_address}")
+        print(f"UA: {user_agent[:50]}")
+        print(f"New hash: {device_hash}")
+        print(f"Old hash: {last_device}")
+        print(f"Is new device: {last_device is not None and last_device != device_hash}")
+        print(f"===================")
+
         is_new_device = last_device is not None and last_device != device_hash
 
-        # Update stored device hash
         user.last_device_hash = device_hash
         db.session.commit()
 
-        # Send alert for non-admin users on new device
         if is_new_device and not user.is_admin:
             try:
-                send_new_device_email(user.email, user.full_name, ip_address, user_agent)
-                print(f"New device alert sent to {user.email}")
+                result = send_new_device_email(user.email, user.full_name, ip_address, user_agent)
+                print(f"Email sent result: {result}")
             except Exception as e:
                 print(f"New device email error: {e}")
 

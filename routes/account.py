@@ -35,9 +35,7 @@ def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sende
 
 <tr><td style="padding:32px;">
 <div style="text-align:center;margin-bottom:24px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:#DBEAFE;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
-    <span style="font-size:28px;">&#10003;</span>
-  </div>
+  <div style="width:64px;height:64px;border-radius:50%;background:#DBEAFE;margin:0 auto 12px auto;text-align:center;line-height:64px;font-size:28px;color:#1A73E8;font-weight:bold;">&#10003;</div>
   <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">Transfer Successful</h2>
   <p style="color:#6B7280;font-size:13px;margin:0;">Your payment has been processed successfully.</p>
 </div>
@@ -79,7 +77,7 @@ def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sende
 </tr>
 </table>
 
-<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:16px;margin-bottom:8px;">
+<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:16px;">
 <p style="color:#92400E;font-size:12px;font-weight:700;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.5px;">Security Notice</p>
 <p style="color:#78350F;font-size:13px;margin:0;line-height:1.6;">
 If you did not initiate this transfer, please change your PIN immediately and contact our support team at support@payease.space
@@ -127,9 +125,7 @@ def send_transfer_email_to_receiver(sender_user, receiver_user, amount, ref, sen
 
 <tr><td style="padding:32px;">
 <div style="text-align:center;margin-bottom:24px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:#D1FAE5;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
-    <span style="font-size:28px;">&#8595;</span>
-  </div>
+  <div style="width:64px;height:64px;border-radius:50%;background:#D1FAE5;margin:0 auto 12px auto;text-align:center;line-height:64px;font-size:32px;color:#16A34A;">&#8595;</div>
   <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">Payment Received</h2>
   <p style="color:#6B7280;font-size:13px;margin:0;">Funds have been credited to your PayEase wallet.</p>
 </div>
@@ -206,19 +202,19 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
     if alert_type == 'large_transfer':
-        title    = 'Large Transfer Alert'
+        title   = 'Large Transfer Alert'
         subtitle = f'A large transfer of PKR {amount:,.0f} was made from your account'
-        color    = '#DC2626'
-        grad     = 'linear-gradient(135deg,#DC2626,#B91C1C)'
-        subject  = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
-        message  = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This transaction exceeds our large transfer threshold of PKR 25,000. If you authorized this transfer, no further action is required. If you did not initiate this transfer, please change your PIN and password immediately and contact our support team.'
+        color   = '#DC2626'
+        grad    = 'linear-gradient(135deg,#DC2626,#B91C1C)'
+        subject = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
+        message = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This transaction exceeds our large transfer threshold of PKR 25,000. If you authorized this transfer, no further action is required. If you did not initiate this transfer, please change your PIN and password immediately and contact our support team.'
     else:
-        title    = 'Unusual Activity Detected'
+        title   = 'Unusual Activity Detected'
         subtitle = 'Multiple rapid transfers have been detected on your account'
-        color    = '#CA8A04'
-        grad     = 'linear-gradient(135deg,#B45309,#92400E)'
-        subject  = 'Unusual Activity Detected — PayEase Security Notice'
-        message  = f'Our system has detected <strong>multiple transfers within a short period</strong> from your PayEase account. The most recent transfer was <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If you made these transfers, no action is required. If you did not authorize these transactions, please change your PIN and password immediately and contact our support team at support@payease.space'
+        color   = '#B45309'
+        grad    = 'linear-gradient(135deg,#B45309,#92400E)'
+        subject = 'Unusual Activity Detected — PayEase Security Notice'
+        message = f'Our system has detected <strong>multiple transfers within a short period</strong> from your PayEase account. The most recent transfer was <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If you made these transfers, no action is required. If you did not authorize these transactions, please change your PIN and password immediately and contact our support team at support@payease.space'
 
     html = f'''<!DOCTYPE html>
 <html>
@@ -235,9 +231,7 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
 
 <tr><td style="padding:32px;">
 <div style="text-align:center;margin-bottom:24px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:#FEE2E2;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
-    <span style="font-size:28px;">&#9888;</span>
-  </div>
+  <div style="width:64px;height:64px;border-radius:50%;background:#FEE2E2;margin:0 auto 12px auto;text-align:center;line-height:64px;font-size:28px;color:{color};">&#9888;</div>
   <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 4px 0;">{title}</h2>
   <p style="color:#6B7280;font-size:13px;margin:0;">{subtitle}</p>
 </div>
@@ -268,7 +262,7 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
 <p style="color:#92400E;font-size:13px;line-height:1.7;margin:0;">{message}</p>
 </div>
 
-<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+<table width="100%" cellpadding="0" cellspacing="0">
 <tr>
 <td style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:16px;width:47%;vertical-align:top;">
   <p style="color:#DC2626;font-size:12px;font-weight:700;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.5px;">Was not you?</p>
@@ -520,7 +514,7 @@ def transaction_history():
     ).order_by(Transaction.created_at.desc()).all()
     result = []
     for txn in transactions:
-        txn_dict            = txn.to_dict()
+        txn_dict              = txn.to_dict()
         txn_dict["direction"] = "credit" if txn.to_wallet == wallet.wallet_number else "debit"
         result.append(txn_dict)
     return jsonify({

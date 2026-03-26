@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from extensions import db
+from extensions import db, limiter
 from models import User, Wallet, Transaction
 import bcrypt
 import os
@@ -15,7 +15,7 @@ SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 
 # ──────────────────────────────────────────
-# EMAIL FUNCTIONS
+# EMAIL FUNCTIONS (unchanged)
 # ──────────────────────────────────────────
 
 def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender_wallet, receiver_wallet_num):
@@ -202,19 +202,19 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
     if alert_type == 'large_transfer':
-        title   = 'Large Transfer Alert'
+        title    = 'Large Transfer Alert'
         subtitle = f'A large transfer of PKR {amount:,.0f} was made from your account'
-        color   = '#DC2626'
-        grad    = 'linear-gradient(135deg,#DC2626,#B91C1C)'
-        subject = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
-        message = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This transaction exceeds our large transfer threshold of PKR 25,000. If you authorized this transfer, no further action is required. If you did not initiate this transfer, please change your PIN and password immediately and contact our support team.'
+        color    = '#DC2626'
+        grad     = 'linear-gradient(135deg,#DC2626,#B91C1C)'
+        subject  = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
+        message  = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This transaction exceeds our large transfer threshold of PKR 25,000. If you authorized this transfer, no further action is required. If you did not initiate this transfer, please change your PIN and password immediately and contact our support team.'
     else:
-        title   = 'Unusual Activity Detected'
+        title    = 'Unusual Activity Detected'
         subtitle = 'Multiple rapid transfers have been detected on your account'
-        color   = '#B45309'
-        grad    = 'linear-gradient(135deg,#B45309,#92400E)'
-        subject = 'Unusual Activity Detected — PayEase Security Notice'
-        message = f'Our system has detected <strong>multiple transfers within a short period</strong> from your PayEase account. The most recent transfer was <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If you made these transfers, no action is required. If you did not authorize these transactions, please change your PIN and password immediately and contact our support team at support@payease.space'
+        color    = '#B45309'
+        grad     = 'linear-gradient(135deg,#B45309,#92400E)'
+        subject  = 'Unusual Activity Detected — PayEase Security Notice'
+        message  = f'Our system has detected <strong>multiple transfers within a short period</strong> from your PayEase account. The most recent transfer was <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If you made these transfers, no action is required. If you did not authorize these transactions, please change your PIN and password immediately and contact our support team at support@payease.space'
 
     html = f'''<!DOCTYPE html>
 <html>
@@ -305,6 +305,7 @@ def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wal
 # ROUTES
 # ──────────────────────────────────────────
 
+# No limit on balance — read-only, called frequently
 @account_bp.route("/balance", methods=["GET"])
 @jwt_required()
 def get_balance():
@@ -314,17 +315,21 @@ def get_balance():
     if not wallet:
         return jsonify({"error": "Wallet not found"}), 404
     return jsonify({
-        "full_name":     user.full_name,
-        "email":         user.email,
-        "phone":         user.phone,
-        "wallet_number": wallet.wallet_number,
-        "balance":       round(wallet.balance, 2),
-        "kyc_verified":  user.kyc_verified
+        "full_name":       user.full_name,
+        "email":           user.email,
+        "phone":           user.phone,
+        "wallet_number":   wallet.wallet_number,
+        "balance":         round(float(wallet.balance), 2),
+        "kyc_verified":    user.kyc_verified,
+        "onboarding_done": user.onboarding_done,
+        "avatar_url":      user.avatar_url,
     }), 200
 
 
+# 10 per hour — prevents deposit spam
 @account_bp.route("/deposit", methods=["POST"])
 @jwt_required()
+@limiter.limit("10 per hour")
 def deposit():
     user_id = get_jwt_identity()
     data    = request.get_json()
@@ -340,6 +345,7 @@ def deposit():
             to_wallet   = wallet.wallet_number,
             amount      = amount,
             type        = "deposit",
+            direction   = "credit",
             description = "Deposit"
         )
         db.session.add(txn)
@@ -356,15 +362,17 @@ def deposit():
             print(f"Notification error: {e}")
         return jsonify({
             "message":     "Deposit successful!",
-            "new_balance": round(wallet.balance, 2)
+            "new_balance": round(float(wallet.balance), 2)
         }), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
 
+# 20 per hour — prevents rapid transfer abuse
 @account_bp.route("/send", methods=["POST"])
 @jwt_required()
+@limiter.limit("20 per hour")
 def send_money():
     user_id = get_jwt_identity()
     data    = request.get_json()
@@ -448,15 +456,28 @@ def send_money():
 
         ref = 'TXN' + str(int(datetime.utcnow().timestamp()))[-8:]
 
-        txn = Transaction(
+        # Debit transaction for sender
+        txn_debit = Transaction(
             user_id     = user_id,
             from_wallet = sender.wallet_number,
             to_wallet   = to_wallet_number,
             amount      = amount,
             type        = "transfer",
+            direction   = "debit",
             description = description
         )
-        db.session.add(txn)
+        # Credit transaction for receiver
+        txn_credit = Transaction(
+            user_id     = receiver_wallet.user_id,
+            from_wallet = sender.wallet_number,
+            to_wallet   = to_wallet_number,
+            amount      = amount,
+            type        = "transfer",
+            direction   = "credit",
+            description = description
+        )
+        db.session.add(txn_debit)
+        db.session.add(txn_credit)
         db.session.commit()
 
         # ── In-App Notifications ──
@@ -494,7 +515,7 @@ def send_money():
             "message":     "Money sent successfully!",
             "amount":      amount,
             "to_wallet":   to_wallet_number,
-            "new_balance": round(sender.balance, 2)
+            "new_balance": round(float(sender.balance), 2)
         }), 200
 
     except Exception as e:
@@ -502,6 +523,7 @@ def send_money():
         return jsonify({"error": str(e)}), 500
 
 
+# No limit on transactions — read-only
 @account_bp.route("/transactions", methods=["GET"])
 @jwt_required()
 def transaction_history():
@@ -525,8 +547,10 @@ def transaction_history():
     }), 200
 
 
+# 30 per hour — lookup is read-only but limit anyway
 @account_bp.route('/lookup', methods=['POST'])
 @jwt_required()
+@limiter.limit("30 per hour")
 def lookup_wallet():
     data          = request.get_json()
     wallet_number = data.get('wallet_number')
@@ -546,8 +570,10 @@ def lookup_wallet():
     }), 200
 
 
+# 30 per hour — phone lookup is read-only but limit anyway
 @account_bp.route('/lookup-phone', methods=['POST'])
 @jwt_required()
+@limiter.limit("30 per hour")
 def lookup_by_phone():
     data  = request.get_json()
     phone = data.get('phone')

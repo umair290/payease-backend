@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.user import User
-from extensions import db
+from extensions import db, limiter
 import bcrypt
 
 otp_bp    = Blueprint('otp', __name__)
@@ -98,7 +98,6 @@ If you did not make this request, please secure your account immediately.
 
 
 def send_confirmation_email(email, full_name, action, extra_info=''):
-    """Send confirmation email after a sensitive action is completed"""
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
     action_config = {
@@ -232,8 +231,10 @@ def send_confirmation_email(email, full_name, action, extra_info=''):
 # OTP ROUTES
 # ──────────────────────────────────────────
 
+# 5 per 15 minutes — prevents OTP spam per user
 @otp_bp.route('/send', methods=['POST'])
 @jwt_required()
+@limiter.limit("5 per 15 minutes")
 def send_otp():
     user_id = get_jwt_identity()
     user    = User.query.get(user_id)
@@ -263,8 +264,10 @@ def send_otp():
     }), 200
 
 
+# 5 per hour — prevents brute force on password change
 @otp_bp.route('/change-password', methods=['POST'])
 @jwt_required()
+@limiter.limit("5 per hour")
 def change_password():
     user_id      = get_jwt_identity()
     user         = User.query.get(user_id)
@@ -291,7 +294,6 @@ def change_password():
     user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     db.session.commit()
 
-    # Send confirmation email
     try:
         send_confirmation_email(user.email, user.full_name, 'password_changed')
     except Exception as e:
@@ -300,8 +302,10 @@ def change_password():
     return jsonify({'message': 'Password changed successfully'}), 200
 
 
+# 5 per hour — prevents brute force on PIN change
 @otp_bp.route('/change-pin', methods=['POST'])
 @jwt_required()
+@limiter.limit("5 per hour")
 def change_pin():
     user_id = get_jwt_identity()
     user    = User.query.get(user_id)
@@ -328,7 +332,6 @@ def change_pin():
     user.pin = bcrypt.hashpw(str(new_pin).encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     db.session.commit()
 
-    # Send confirmation email
     try:
         send_confirmation_email(user.email, user.full_name, 'pin_changed')
     except Exception as e:
@@ -337,8 +340,10 @@ def change_pin():
     return jsonify({'message': 'PIN changed successfully'}), 200
 
 
+# 5 per hour — prevents profile update spam
 @otp_bp.route('/update-profile', methods=['POST'])
 @jwt_required()
+@limiter.limit("5 per hour")
 def update_profile():
     user_id   = get_jwt_identity()
     user      = User.query.get(user_id)
@@ -354,21 +359,17 @@ def update_profile():
     if not phone:
         return jsonify({'error': 'Phone number is required'}), 400
 
-    # Validate full name — only letters and spaces
     if not all(c.isalpha() or c.isspace() for c in full_name):
         return jsonify({'error': 'Full name must contain only letters and spaces'}), 400
 
-    # Validate phone — digits only, 10-13 chars
     clean_phone = phone.replace(' ', '').replace('-', '')
     if not clean_phone.isdigit() or not (10 <= len(clean_phone) <= 13):
         return jsonify({'error': 'Enter a valid phone number (10-13 digits)'}), 400
 
-    # Check phone not already taken by someone else
     existing = User.query.filter_by(phone=clean_phone).first()
     if existing and existing.id != int(user_id):
         return jsonify({'error': 'This phone number is already registered to another account'}), 409
 
-    # Verify OTP
     key    = f"{user_id}_update_profile"
     stored = otp_store.get(key)
     if not stored:
@@ -381,7 +382,6 @@ def update_profile():
 
     del otp_store[key]
 
-    # Save changes
     old_name  = user.full_name
     old_phone = user.phone
     user.full_name = full_name
@@ -393,7 +393,6 @@ def update_profile():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-    # Send confirmation email
     try:
         changes = []
         if old_name != full_name:
@@ -412,7 +411,9 @@ def update_profile():
     }), 200
 
 
+# 3 per 15 minutes — prevents forgot password OTP spam
 @otp_bp.route('/forgot-password/send', methods=['POST'])
+@limiter.limit("3 per 15 minutes")
 def forgot_password_send():
     data  = request.get_json()
     email = data.get('email', '').strip().lower()
@@ -438,7 +439,9 @@ def forgot_password_send():
     }), 200
 
 
+# 5 per hour — prevents brute force on reset
 @otp_bp.route('/forgot-password/reset', methods=['POST'])
+@limiter.limit("5 per hour")
 def forgot_password_reset():
     data         = request.get_json()
     email        = data.get('email', '').strip().lower()
@@ -469,7 +472,6 @@ def forgot_password_reset():
     user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     db.session.commit()
 
-    # Send confirmation email
     try:
         send_confirmation_email(user.email, user.full_name, 'password_changed')
     except Exception as e:

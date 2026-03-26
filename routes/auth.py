@@ -6,7 +6,7 @@ from flask_jwt_extended import (
     get_jwt_identity,
     get_jwt
 )
-from extensions import db
+from extensions import db, limiter
 from models import User, Wallet
 from models.token_blocklist import TokenBlocklist
 import bcrypt
@@ -45,7 +45,7 @@ def get_ip(req):
     return ip.split(',')[0].strip()
 
 
-# ── Email helpers (unchanged) ──
+# ── Email helpers ──
 def send_registration_otp_email(email, otp, full_name):
     html_body = f'''<!DOCTYPE html>
 <html>
@@ -170,7 +170,9 @@ Never share your password or PIN with anyone.
 
 
 # ── STEP 1: Initiate Registration ──
+# 5 attempts per hour per IP — prevents mass account creation
 @auth_bp.route("/register/initiate", methods=["POST"])
+@limiter.limit("5 per hour")
 def initiate_register():
     data = request.get_json()
     if not data:
@@ -215,7 +217,9 @@ def initiate_register():
 
 
 # ── STEP 2: Verify OTP and Complete Registration ──
+# 10 attempts per hour — prevents OTP brute force
 @auth_bp.route("/register/verify", methods=["POST"])
+@limiter.limit("10 per hour")
 def verify_and_register():
     data = request.get_json()
     if not data:
@@ -279,7 +283,9 @@ def verify_and_register():
 
 
 # ── RESEND OTP ──
+# 3 per 15 minutes — prevents OTP spam
 @auth_bp.route("/register/resend-otp", methods=["POST"])
+@limiter.limit("3 per 15 minutes")
 def resend_registration_otp():
     data  = request.get_json()
     email = data.get("email", "").strip().lower()
@@ -302,7 +308,9 @@ def resend_registration_otp():
 
 
 # ── LOGIN ──
+# 10 per 15 minutes — prevents password brute force
 @auth_bp.route("/login", methods=["POST"])
+@limiter.limit("10 per 15 minutes")
 def login():
     data = request.get_json()
     if not data:
@@ -367,8 +375,10 @@ def login():
     }), 200
 
 
-# ── REFRESH — get new access token using refresh token ──
+# ── REFRESH ──
+# 30 per hour — generous for silent auto-refresh
 @auth_bp.route("/refresh", methods=["POST"])
+@limiter.limit("30 per hour")
 @jwt_required(refresh=True)
 def refresh():
     user_id = get_jwt_identity()
@@ -386,7 +396,8 @@ def refresh():
     }), 200
 
 
-# ── LOGOUT — blacklist the current token ──
+# ── LOGOUT ──
+# No strict limit needed — legitimate users log out once
 @auth_bp.route("/logout", methods=["POST"])
 @jwt_required()
 def logout():
@@ -395,13 +406,12 @@ def logout():
         jti      = jwt_data["jti"]
         user_id  = int(get_jwt_identity())
 
-        # Add to blocklist — token is now dead
         blocked = TokenBlocklist(jti=jti, user_id=user_id)
         db.session.add(blocked)
         db.session.commit()
 
         try:
-            add_log(user_id, 'User Logout', f'Logged out — token invalidated')
+            add_log(user_id, 'User Logout', 'Logged out — token invalidated')
         except Exception:
             pass
 
@@ -411,8 +421,7 @@ def logout():
         return jsonify({"error": str(e)}), 500
 
 
-# ── LOGOUT ALL — blacklist ALL tokens for this user ──
-# Useful if user suspects account compromise
+# ── LOGOUT ALL ──
 @auth_bp.route("/logout-all", methods=["POST"])
 @jwt_required()
 def logout_all():
@@ -421,7 +430,6 @@ def logout_all():
         jti      = jwt_data["jti"]
         user_id  = int(get_jwt_identity())
 
-        # Blacklist current token
         blocked = TokenBlocklist(jti=jti, user_id=user_id)
         db.session.add(blocked)
         db.session.commit()
@@ -437,8 +445,10 @@ def logout_all():
         return jsonify({"error": str(e)}), 500
 
 
-# ── SETUP ADMIN (unchanged) ──
+# ── SETUP ADMIN ──
+# 3 per day — setup should only happen once
 @auth_bp.route('/setup-admin', methods=['POST'])
+@limiter.limit("3 per day")
 def setup_admin():
     data   = request.get_json()
     secret = data.get('secret')
@@ -476,3 +486,4 @@ def setup_admin():
     db.session.add(wallet)
     db.session.commit()
     return jsonify({'message': 'Admin created successfully!'})
+

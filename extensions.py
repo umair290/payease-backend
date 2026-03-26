@@ -1,23 +1,27 @@
 import os
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
-from datetime import timedelta
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-# These extensions are created here and initialized in app.py
-# which prevents circular imports
-db  = SQLAlchemy()
-jwt = JWTManager()
+# ── Extensions ──
+db      = SQLAlchemy()
+jwt     = JWTManager()
+limiter = Limiter(
+    key_func       = get_remote_address,
+    default_limits = ["200 per hour", "50 per minute"],
+    storage_uri    = "memory://",
+)
 
-# ── JWT token blocklist check ──
-# This runs on every protected route automatically
+# ── JWT: token blocklist check ──
 @jwt.token_in_blocklist_loader
 def check_if_token_revoked(jwt_header, jwt_payload):
     from models.token_blocklist import TokenBlocklist
-    jti    = jwt_payload["jti"]
-    token  = TokenBlocklist.query.filter_by(jti=jti).first()
+    jti   = jwt_payload["jti"]
+    token = TokenBlocklist.query.filter_by(jti=jti).first()
     return token is not None
 
-# ── Custom error responses ──
+# ── JWT: custom error responses ──
 @jwt.revoked_token_loader
 def revoked_token_callback(jwt_header, jwt_payload):
     from flask import jsonify

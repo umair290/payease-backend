@@ -13,21 +13,22 @@ def create_app(config_name="default"):
     # Load config
     app.config.from_object(config[config_name])
 
-    # Create uploads folder if not exists
+    # Create uploads folder
     os.makedirs("uploads/kyc", exist_ok=True)
 
     # Initialize extensions
     db.init_app(app)
     jwt.init_app(app)
 
-    # Register blueprints
-    from routes.auth import auth_bp
-    from routes.account import account_bp
-    from routes.kyc import kyc_bp
-    from routes.admin import admin_bp
-    from routes.bills import bills_bp
-    from routes.otp import otp_bp
+    # ── Register Blueprints ──
+    from routes.auth          import auth_bp
+    from routes.account       import account_bp
+    from routes.kyc           import kyc_bp
+    from routes.admin         import admin_bp
+    from routes.bills         import bills_bp
+    from routes.otp           import otp_bp
     from routes.notifications import notifications_bp
+    from routes.preferences   import preferences_bp
 
     app.register_blueprint(auth_bp,           url_prefix="/api/auth")
     app.register_blueprint(account_bp,        url_prefix="/api/account")
@@ -36,22 +37,65 @@ def create_app(config_name="default"):
     app.register_blueprint(bills_bp,          url_prefix="/api/bills")
     app.register_blueprint(otp_bp,            url_prefix="/api/otp")
     app.register_blueprint(notifications_bp,  url_prefix="/api/notifications")
+    app.register_blueprint(preferences_bp,    url_prefix="/api/preferences")
 
     with app.app_context():
         db.create_all()
+
         try:
             from sqlalchemy import text
             with db.engine.connect() as conn:
-                # KYC columns
+
+                print("Running migrations...")
+
+                # ── KYC columns (original) ──
                 conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS full_name_on_card VARCHAR(100)'))
                 conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(20)'))
-                # Device detection column
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP'))
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(500)'))
+
+                # ── User new columns ──
                 conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_device_hash VARCHAR(32)'))
+                conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_done BOOLEAN DEFAULT FALSE NOT NULL'))
+                conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500)'))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS beneficiaries TEXT DEFAULT '[]' NOT NULL"))
+                conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP'))
+                conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0 NOT NULL'))
+                conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP'))
+
+                # ── Wallet new columns ──
+                conn.execute(text('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS last_reset_date DATE'))
+                conn.execute(text('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS version_id INTEGER DEFAULT 0 NOT NULL'))
+                conn.execute(text('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP'))
+
+                # ── Transaction new columns ──
+                conn.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'debit' NOT NULL"))
+                conn.execute(text('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(64)'))
+
+                # ── Indexes ──
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_users_email          ON users(email)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_users_phone          ON users(phone)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_wallets_user_id      ON wallets(user_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_wallets_wallet_number ON wallets(wallet_number)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_transactions_user_id  ON transactions(user_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_transactions_from_wallet ON transactions(from_wallet)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_transactions_to_wallet   ON transactions(to_wallet)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_transactions_type        ON transactions(type)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_transactions_created_at  ON transactions(created_at)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_transactions_idempotency ON transactions(idempotency_key)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_bills_user_id    ON bills(user_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_bills_status     ON bills(status)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_bills_created_at ON bills(created_at)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_kyc_user_id      ON kyc(user_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS ix_kyc_status       ON kyc(status)'))
+
                 conn.commit()
-                print("All migrations done!")
+                print("✅ All migrations done!")
+
         except Exception as e:
             print(f"Migration note: {e}")
-        print("Database ready!")
+
+        print("✅ Database ready!")
 
     return app
 

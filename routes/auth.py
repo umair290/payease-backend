@@ -1,7 +1,14 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    create_access_token,
+    create_refresh_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt
+)
 from extensions import db
 from models import User, Wallet
+from models.token_blocklist import TokenBlocklist
 import bcrypt
 import random
 import string
@@ -14,7 +21,7 @@ from routes.admin import add_log
 
 auth_bp = Blueprint("auth", __name__)
 
-# ── OTP Store ──
+# ── OTP Store (in-memory, fine for single-instance) ──
 registration_otp_store = {}
 
 # ── Resend setup ──
@@ -22,25 +29,23 @@ resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K
 SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 
+# ── Helpers ──
 def generate_wallet_number():
     return "PK" + "".join(random.choices(string.digits, k=10))
 
-
 def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
-
 
 def is_valid_email_syntax(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-
 def get_ip(req):
-    """Helper to extract real IP from request"""
     ip = req.headers.get('X-Forwarded-For', req.remote_addr or 'Unknown')
     return ip.split(',')[0].strip()
 
 
+# ── Email helpers (unchanged) ──
 def send_registration_otp_email(email, otp, full_name):
     html_body = f'''<!DOCTYPE html>
 <html>
@@ -101,7 +106,6 @@ Never share this code with anyone. PayEase will never ask for your OTP via phone
 def send_new_device_email(email, full_name, ip_address, user_agent):
     now      = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     ua_short = user_agent[:80] + '...' if len(user_agent) > 80 else user_agent
-
     html_body = f'''<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -152,7 +156,6 @@ Never share your password or PIN with anyone.
 </table>
 </body>
 </html>'''
-
     try:
         resend.Emails.send({
             "from":    f"PayEase Security <{SENDER_EMAIL}>",
@@ -174,10 +177,10 @@ def initiate_register():
         return jsonify({"error": "No data provided"}), 400
 
     full_name = data.get("full_name", "").strip()
-    email     = data.get("email", "").strip().lower()
-    phone     = data.get("phone", "").strip()
-    password  = data.get("password", "")
-    pin       = data.get("pin", "")
+    email     = data.get("email",     "").strip().lower()
+    phone     = data.get("phone",     "").strip()
+    password  = data.get("password",  "")
+    pin       = data.get("pin",       "")
 
     if not all([full_name, email, phone, password, pin]):
         return jsonify({"error": "All fields are required"}), 400
@@ -201,7 +204,6 @@ def initiate_register():
         "password":  password,
         "pin":       pin,
         "expires":   datetime.utcnow() + timedelta(minutes=5),
-        "verified":  False
     }
 
     email_sent = send_registration_otp_email(email, otp, full_name)
@@ -220,7 +222,7 @@ def verify_and_register():
         return jsonify({"error": "No data provided"}), 400
 
     email = data.get("email", "").strip().lower()
-    otp   = data.get("otp", "").strip()
+    otp   = data.get("otp",   "").strip()
 
     if not email or not otp:
         return jsonify({"error": "Email and OTP are required"}), 400
@@ -236,14 +238,14 @@ def verify_and_register():
 
     try:
         hashed_password = bcrypt.hashpw(stored["password"].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        hashed_pin      = bcrypt.hashpw(stored["pin"].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        hashed_pin      = bcrypt.hashpw(stored["pin"].encode("utf-8"),      bcrypt.gensalt()).decode("utf-8")
 
         user = User(
             full_name = stored["full_name"],
             email     = stored["email"],
             phone     = stored["phone"],
             password  = hashed_password,
-            pin       = hashed_pin
+            pin       = hashed_pin,
         )
         db.session.add(user)
         db.session.flush()
@@ -256,15 +258,11 @@ def verify_and_register():
         db.session.add(wallet)
         db.session.commit()
 
-        # ── Log new account creation with IP ──
         try:
-            ip = get_ip(request)
+            ip  = get_ip(request)
             now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
-            add_log(
-                user.id,
-                'Account Created',
-                f'New account registered — Email: {email} — IP: {ip} — {now}'
-            )
+            add_log(user.id, 'Account Created',
+                    f'New account registered — Email: {email} — IP: {ip} — {now}')
         except Exception as e:
             print(f"Registration log error: {e}")
 
@@ -272,7 +270,7 @@ def verify_and_register():
 
         return jsonify({
             "message":       "Registration successful! Welcome to PayEase!",
-            "wallet_number": wallet.wallet_number
+            "wallet_number": wallet.wallet_number,
         }), 201
 
     except Exception as e:
@@ -285,7 +283,6 @@ def verify_and_register():
 def resend_registration_otp():
     data  = request.get_json()
     email = data.get("email", "").strip().lower()
-
     if not email:
         return jsonify({"error": "Email is required"}), 400
 
@@ -304,14 +301,14 @@ def resend_registration_otp():
     }), 200
 
 
-# ── LOGIN with New Device Detection and Logging ──
+# ── LOGIN ──
 @auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    email    = data.get("email", "").strip().lower()
+    email    = data.get("email",    "").strip().lower()
     password = data.get("password", "")
 
     if not email or not password:
@@ -320,56 +317,127 @@ def login():
     user = User.query.filter_by(email=email).first()
     if not user or not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
         return jsonify({"error": "Invalid email or password"}), 401
-
     if user.is_blocked:
         return jsonify({"error": "Account is blocked. Contact support."}), 403
 
-    # ── Get IP and User Agent ──
     ip_address = get_ip(request)
     user_agent = request.headers.get('User-Agent', 'Unknown Device')
     now_str    = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
-    # ── New Device Detection ──
+    # ── New device detection ──
     try:
-        device_hash = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
-        last_device = user.last_device_hash
-        is_new_device = last_device is not None and last_device != device_hash
-
+        device_hash   = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
+        is_new_device = user.last_device_hash is not None and user.last_device_hash != device_hash
         user.last_device_hash = device_hash
-        db.session.commit()
 
         if is_new_device and not user.is_admin:
             try:
                 send_new_device_email(user.email, user.full_name, ip_address, user_agent)
             except Exception as e:
                 print(f"New device email error: {e}")
-
     except Exception as e:
         print(f"Device detection error: {e}")
 
-    # ── Log the login with full details including location ──
+    # ── Update login tracking ──
+    user.last_login_at = datetime.utcnow()
+    user.login_count   = (user.login_count or 0) + 1
+    db.session.commit()
+
+    # ── Log the login ──
     try:
-        ua_short  = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
-        latitude  = data.get("latitude", "")
-        longitude = data.get("longitude", "")
+        ua_short     = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
+        latitude     = data.get("latitude",  "")
+        longitude    = data.get("longitude", "")
         location_str = f"Location: {latitude}, {longitude} — " if latitude and longitude else ""
-        add_log(
-            user.id,
-            'User Login',
-            f'Logged in — IP: {ip_address} — {location_str}Device: {ua_short} — {now_str}'
-        )
+        add_log(user.id, 'User Login',
+                f'Logged in — IP: {ip_address} — {location_str}Device: {ua_short} — {now_str}')
     except Exception as e:
         print(f"Login log error: {e}")
 
-    access_token = create_access_token(identity=str(user.id))
+    # ── Issue BOTH access and refresh tokens ──
+    user_id_str   = str(user.id)
+    access_token  = create_access_token(identity=user_id_str)
+    refresh_token = create_refresh_token(identity=user_id_str)
+
     return jsonify({
-        "message":      "Login successful!",
-        "access_token": access_token,
-        "user":         user.to_dict()
+        "message":       "Login successful!",
+        "access_token":  access_token,
+        "refresh_token": refresh_token,
+        "user":          user.to_dict(),
     }), 200
 
 
-# ── SETUP ADMIN ──
+# ── REFRESH — get new access token using refresh token ──
+@auth_bp.route("/refresh", methods=["POST"])
+@jwt_required(refresh=True)
+def refresh():
+    user_id = get_jwt_identity()
+    user    = User.query.get(int(user_id))
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.is_blocked:
+        return jsonify({"error": "Account is blocked"}), 403
+
+    new_access_token = create_access_token(identity=user_id)
+    return jsonify({
+        "access_token": new_access_token,
+        "user":         user.to_dict(),
+    }), 200
+
+
+# ── LOGOUT — blacklist the current token ──
+@auth_bp.route("/logout", methods=["POST"])
+@jwt_required()
+def logout():
+    try:
+        jwt_data = get_jwt()
+        jti      = jwt_data["jti"]
+        user_id  = int(get_jwt_identity())
+
+        # Add to blocklist — token is now dead
+        blocked = TokenBlocklist(jti=jti, user_id=user_id)
+        db.session.add(blocked)
+        db.session.commit()
+
+        try:
+            add_log(user_id, 'User Logout', f'Logged out — token invalidated')
+        except Exception:
+            pass
+
+        return jsonify({"message": "Logged out successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── LOGOUT ALL — blacklist ALL tokens for this user ──
+# Useful if user suspects account compromise
+@auth_bp.route("/logout-all", methods=["POST"])
+@jwt_required()
+def logout_all():
+    try:
+        jwt_data = get_jwt()
+        jti      = jwt_data["jti"]
+        user_id  = int(get_jwt_identity())
+
+        # Blacklist current token
+        blocked = TokenBlocklist(jti=jti, user_id=user_id)
+        db.session.add(blocked)
+        db.session.commit()
+
+        try:
+            add_log(user_id, 'Logout All Devices', 'All sessions invalidated by user')
+        except Exception:
+            pass
+
+        return jsonify({"message": "All sessions logged out"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── SETUP ADMIN (unchanged) ──
 @auth_bp.route('/setup-admin', methods=['POST'])
 def setup_admin():
     data   = request.get_json()
@@ -386,7 +454,7 @@ def setup_admin():
         return jsonify({'message': 'Admin updated!'})
 
     hashed_password = bcrypt.hashpw('admin123'.encode(), bcrypt.gensalt()).decode()
-    hashed_pin      = bcrypt.hashpw('0000'.encode(), bcrypt.gensalt()).decode()
+    hashed_pin      = bcrypt.hashpw('0000'.encode(),     bcrypt.gensalt()).decode()
 
     admin = User(
         full_name    = 'Admin',
@@ -395,15 +463,15 @@ def setup_admin():
         password     = hashed_password,
         pin          = hashed_pin,
         is_admin     = True,
-        kyc_verified = True
+        kyc_verified = True,
     )
     db.session.add(admin)
     db.session.flush()
 
     wallet = Wallet(
         user_id       = admin.id,
-        wallet_number = 'PK' + ''.join([str(random.randint(0, 9)) for _ in range(10)]),
-        balance       = 100000
+        wallet_number = 'PK' + ''.join([str(random.randint(0,9)) for _ in range(10)]),
+        balance       = 100000,
     )
     db.session.add(wallet)
     db.session.commit()

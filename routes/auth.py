@@ -9,11 +9,17 @@ from flask_jwt_extended import (
 from extensions import db, limiter
 from models import User, Wallet
 from models.token_blocklist import TokenBlocklist
+from utils.sanitize import (
+    clean, clean_name, clean_email, clean_phone,
+    clean_password, clean_pin, clean_otp,
+    validate_email, validate_password, validate_pin,
+    validate_phone, validate_name, validate_otp
+)
+import re
 import bcrypt
 import random
 import string
 import os
-import re
 import resend
 import hashlib
 from datetime import datetime, timedelta
@@ -21,31 +27,22 @@ from routes.admin import add_log
 
 auth_bp = Blueprint("auth", __name__)
 
-# ── OTP Store (in-memory, fine for single-instance) ──
 registration_otp_store = {}
 
-# ── Resend setup ──
 resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
 SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
-
-# ── Helpers ──
 def generate_wallet_number():
     return "PK" + "".join(random.choices(string.digits, k=10))
 
 def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
 
-def is_valid_email_syntax(email):
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email) is not None
-
 def get_ip(req):
     ip = req.headers.get('X-Forwarded-For', req.remote_addr or 'Unknown')
     return ip.split(',')[0].strip()
 
-
-# ── Email helpers ──
+# ── Keep all email functions exactly as they are ──
 def send_registration_otp_email(email, otp, full_name):
     html_body = f'''<!DOCTYPE html>
 <html>
@@ -170,7 +167,6 @@ Never share your password or PIN with anyone.
 
 
 # ── STEP 1: Initiate Registration ──
-# 5 attempts per hour per IP — prevents mass account creation
 @auth_bp.route("/register/initiate", methods=["POST"])
 @limiter.limit("5 per hour")
 def initiate_register():
@@ -178,20 +174,25 @@ def initiate_register():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    full_name = data.get("full_name", "").strip()
-    email     = data.get("email",     "").strip().lower()
-    phone     = data.get("phone",     "").strip()
-    password  = data.get("password",  "")
-    pin       = data.get("pin",       "")
+    # ── Sanitize all inputs ──
+    full_name = clean_name(data.get("full_name", ""))
+    email     = clean_email(data.get("email", ""))
+    phone     = clean_phone(data.get("phone", ""))
+    password  = clean_password(data.get("password", ""))
+    pin       = clean_pin(str(data.get("pin", "")))
 
-    if not all([full_name, email, phone, password, pin]):
-        return jsonify({"error": "All fields are required"}), 400
-    if len(pin) != 4 or not pin.isdigit():
-        return jsonify({"error": "PIN must be 4 digits"}), 400
-    if len(password) < 6:
-        return jsonify({"error": "Password must be at least 6 characters"}), 400
-    if not is_valid_email_syntax(email):
-        return jsonify({"error": "Invalid email address format"}), 400
+    # ── Validate ──
+    err = validate_name(full_name);     
+    if err: return jsonify({"error": err}), 400
+    err = validate_email(email);        
+    if err: return jsonify({"error": err}), 400
+    err = validate_phone(phone);        
+    if err: return jsonify({"error": err}), 400
+    err = validate_password(password);  
+    if err: return jsonify({"error": err}), 400
+    err = validate_pin(pin);            
+    if err: return jsonify({"error": err}), 400
+
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "Email already registered"}), 409
     if User.query.filter_by(phone=phone).first():
@@ -216,8 +217,7 @@ def initiate_register():
     }), 200
 
 
-# ── STEP 2: Verify OTP and Complete Registration ──
-# 10 attempts per hour — prevents OTP brute force
+# ── STEP 2: Verify OTP ──
 @auth_bp.route("/register/verify", methods=["POST"])
 @limiter.limit("10 per hour")
 def verify_and_register():
@@ -225,11 +225,13 @@ def verify_and_register():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    email = data.get("email", "").strip().lower()
-    otp   = data.get("otp",   "").strip()
+    email = clean_email(data.get("email", ""))
+    otp   = clean_otp(data.get("otp", ""))
 
-    if not email or not otp:
-        return jsonify({"error": "Email and OTP are required"}), 400
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+    err = validate_otp(otp)
+    if err: return jsonify({"error": err}), 400
 
     stored = registration_otp_store.get(email)
     if not stored:
@@ -271,7 +273,6 @@ def verify_and_register():
             print(f"Registration log error: {e}")
 
         del registration_otp_store[email]
-
         return jsonify({
             "message":       "Registration successful! Welcome to PayEase!",
             "wallet_number": wallet.wallet_number,
@@ -283,12 +284,11 @@ def verify_and_register():
 
 
 # ── RESEND OTP ──
-# 3 per 15 minutes — prevents OTP spam
 @auth_bp.route("/register/resend-otp", methods=["POST"])
 @limiter.limit("3 per 15 minutes")
 def resend_registration_otp():
     data  = request.get_json()
-    email = data.get("email", "").strip().lower()
+    email = clean_email(data.get("email", ""))
     if not email:
         return jsonify({"error": "Email is required"}), 400
 
@@ -301,14 +301,10 @@ def resend_registration_otp():
     stored["expires"] = datetime.utcnow() + timedelta(minutes=5)
 
     email_sent = send_registration_otp_email(email, otp, stored["full_name"])
-    return jsonify({
-        "message":    f"New OTP sent to {email}",
-        "email_sent": email_sent,
-    }), 200
+    return jsonify({"message": f"New OTP sent to {email}", "email_sent": email_sent}), 200
 
 
 # ── LOGIN ──
-# 10 per 15 minutes — prevents password brute force
 @auth_bp.route("/login", methods=["POST"])
 @limiter.limit("10 per 15 minutes")
 def login():
@@ -316,8 +312,9 @@ def login():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    email    = data.get("email",    "").strip().lower()
-    password = data.get("password", "")
+    # ── Sanitize ──
+    email    = clean_email(data.get("email", ""))
+    password = clean_password(data.get("password", ""))
 
     if not email or not password:
         return jsonify({"error": "Email and password are required"}), 400
@@ -337,7 +334,6 @@ def login():
         device_hash   = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
         is_new_device = user.last_device_hash is not None and user.last_device_hash != device_hash
         user.last_device_hash = device_hash
-
         if is_new_device and not user.is_admin:
             try:
                 send_new_device_email(user.email, user.full_name, ip_address, user_agent)
@@ -346,23 +342,21 @@ def login():
     except Exception as e:
         print(f"Device detection error: {e}")
 
-    # ── Update login tracking ──
     user.last_login_at = datetime.utcnow()
     user.login_count   = (user.login_count or 0) + 1
     db.session.commit()
 
-    # ── Log the login ──
     try:
         ua_short     = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
-        latitude     = data.get("latitude",  "")
-        longitude    = data.get("longitude", "")
+        # Sanitize location coords — digits, dots, minus only
+        latitude     = re.sub(r'[^0-9.\-]', '', str(data.get("latitude",  "")))[:12]
+        longitude    = re.sub(r'[^0-9.\-]', '', str(data.get("longitude", "")))[:12]
         location_str = f"Location: {latitude}, {longitude} — " if latitude and longitude else ""
         add_log(user.id, 'User Login',
                 f'Logged in — IP: {ip_address} — {location_str}Device: {ua_short} — {now_str}')
     except Exception as e:
         print(f"Login log error: {e}")
 
-    # ── Issue BOTH access and refresh tokens ──
     user_id_str   = str(user.id)
     access_token  = create_access_token(identity=user_id_str)
     refresh_token = create_refresh_token(identity=user_id_str)
@@ -376,28 +370,21 @@ def login():
 
 
 # ── REFRESH ──
-# 30 per hour — generous for silent auto-refresh
 @auth_bp.route("/refresh", methods=["POST"])
 @limiter.limit("30 per hour")
 @jwt_required(refresh=True)
 def refresh():
     user_id = get_jwt_identity()
     user    = User.query.get(int(user_id))
-
     if not user:
         return jsonify({"error": "User not found"}), 404
     if user.is_blocked:
         return jsonify({"error": "Account is blocked"}), 403
-
     new_access_token = create_access_token(identity=user_id)
-    return jsonify({
-        "access_token": new_access_token,
-        "user":         user.to_dict(),
-    }), 200
+    return jsonify({"access_token": new_access_token, "user": user.to_dict()}), 200
 
 
 # ── LOGOUT ──
-# No strict limit needed — legitimate users log out once
 @auth_bp.route("/logout", methods=["POST"])
 @jwt_required()
 def logout():
@@ -405,18 +392,14 @@ def logout():
         jwt_data = get_jwt()
         jti      = jwt_data["jti"]
         user_id  = int(get_jwt_identity())
-
-        blocked = TokenBlocklist(jti=jti, user_id=user_id)
+        blocked  = TokenBlocklist(jti=jti, user_id=user_id)
         db.session.add(blocked)
         db.session.commit()
-
         try:
             add_log(user_id, 'User Logout', 'Logged out — token invalidated')
         except Exception:
             pass
-
         return jsonify({"message": "Logged out successfully"}), 200
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -429,29 +412,24 @@ def logout_all():
         jwt_data = get_jwt()
         jti      = jwt_data["jti"]
         user_id  = int(get_jwt_identity())
-
-        blocked = TokenBlocklist(jti=jti, user_id=user_id)
+        blocked  = TokenBlocklist(jti=jti, user_id=user_id)
         db.session.add(blocked)
         db.session.commit()
-
         try:
             add_log(user_id, 'Logout All Devices', 'All sessions invalidated by user')
         except Exception:
             pass
-
         return jsonify({"message": "All sessions logged out"}), 200
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 # ── SETUP ADMIN ──
-# 3 per day — setup should only happen once
 @auth_bp.route('/setup-admin', methods=['POST'])
 @limiter.limit("3 per day")
 def setup_admin():
     data   = request.get_json()
-    secret = data.get('secret')
+    secret = clean(data.get('secret', ''), 64)
 
     if secret != 'payease-setup-2024':
         return jsonify({'error': 'Unauthorized'}), 401
@@ -467,23 +445,17 @@ def setup_admin():
     hashed_pin      = bcrypt.hashpw('0000'.encode(),     bcrypt.gensalt()).decode()
 
     admin = User(
-        full_name    = 'Admin',
-        email        = 'admin@payease.com',
-        phone        = '03000000000',
-        password     = hashed_password,
-        pin          = hashed_pin,
-        is_admin     = True,
-        kyc_verified = True,
+        full_name='Admin', email='admin@payease.com', phone='03000000000',
+        password=hashed_password, pin=hashed_pin, is_admin=True, kyc_verified=True,
     )
     db.session.add(admin)
     db.session.flush()
 
     wallet = Wallet(
-        user_id       = admin.id,
-        wallet_number = 'PK' + ''.join([str(random.randint(0,9)) for _ in range(10)]),
-        balance       = 100000,
+        user_id=admin.id,
+        wallet_number='PK' + ''.join([str(random.randint(0,9)) for _ in range(10)]),
+        balance=100000,
     )
     db.session.add(wallet)
     db.session.commit()
     return jsonify({'message': 'Admin created successfully!'})
-

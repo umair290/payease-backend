@@ -7,6 +7,12 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.user import User
 from extensions import db, limiter
+from utils.sanitize import (
+    clean, clean_email, clean_otp, clean_name, clean_phone,
+    clean_password, clean_pin, clean_reason, clean_purpose,
+    VALID_PURPOSES, validate_email, validate_password,
+    validate_pin, validate_name, validate_phone, validate_otp
+)
 import bcrypt
 
 otp_bp    = Blueprint('otp', __name__)
@@ -26,13 +32,12 @@ def generate_otp():
 
 def send_otp_email(email, otp, purpose):
     labels = {
-        'change_password':  'Change Password',
-        'change_pin':       'Change PIN',
-        'forgot_password':  'Password Reset',
-        'update_profile':   'Profile Update',
+        'change_password': 'Change Password',
+        'change_pin':      'Change PIN',
+        'forgot_password': 'Password Reset',
+        'update_profile':  'Profile Update',
     }
     label = labels.get(purpose, 'Verification')
-    now   = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
     html = f'''<!DOCTYPE html>
 <html>
@@ -41,18 +46,15 @@ def send_otp_email(email, otp, purpose):
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-
 <tr><td style="background:linear-gradient(135deg,#1A73E8,#0052CC);padding:28px;text-align:center;">
 <p style="color:#fff;font-size:28px;font-weight:bold;margin:0;letter-spacing:-0.5px;">PayEase</p>
 <p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Digital Wallet and Payment Services</p>
 </td></tr>
-
 <tr><td style="padding:32px;">
 <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 8px 0;">{label} Request</h2>
 <p style="color:#6B7280;font-size:14px;margin:0 0 24px 0;line-height:1.6;">
 A {label.lower()} request was made for your PayEase account. Use the verification code below to proceed.
 </p>
-
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="background:#F0F4FF;border:2px dashed #1A73E8;border-radius:16px;padding:28px;text-align:center;">
 <p style="color:#6B7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin:0 0 14px 0;">Verification Code</p>
@@ -60,7 +62,6 @@ A {label.lower()} request was made for your PayEase account. Use the verificatio
 <p style="color:#DC2626;font-size:12px;font-weight:600;margin:14px 0 0 0;">Expires in 10 minutes</p>
 </td></tr>
 </table>
-
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;">
 <tr><td style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:16px;">
 <p style="color:#92400E;font-size:12px;font-weight:700;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.5px;">Security Notice</p>
@@ -71,13 +72,11 @@ If you did not make this request, please secure your account immediately.
 </td></tr>
 </table>
 </td></tr>
-
 <tr><td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 32px;text-align:center;">
 <p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
 <p style="color:#9CA3AF;font-size:11px;margin:0;">payease.space &nbsp;|&nbsp; support@payease.space</p>
 <p style="color:#9CA3AF;font-size:10px;margin:6px 0 0 0;">This is an automated message. Please do not reply to this email.</p>
 </td></tr>
-
 </table>
 </td></tr>
 </table>
@@ -146,6 +145,12 @@ def send_confirmation_email(email, full_name, action, extra_info=''):
         'grad':    'linear-gradient(135deg,#1A73E8,#0052CC)',
     })
 
+    icon  = '&#10003;' if any(x in action for x in ['approved','changed','updated']) else '&#10007;'
+    ibg   = '#DCFCE7' if any(x in action for x in ['approved','changed','updated']) else '#FEE2E2'
+    warn_html = f"""<div style='background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:16px;margin-top:16px;'>
+<p style='color:#92400E;font-size:12px;font-weight:700;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:0.5px;'>Security Notice</p>
+<p style='color:#78350F;font-size:13px;margin:0;line-height:1.6;'>{cfg['warning']}</p></div>""" if cfg['warning'] else ''
+
     html = f'''<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -153,21 +158,16 @@ def send_confirmation_email(email, full_name, action, extra_info=''):
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4FF;padding:40px 0;">
 <tr><td align="center">
 <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-
 <tr><td style="background:{cfg["grad"]};padding:28px;text-align:center;">
 <p style="color:#fff;font-size:28px;font-weight:bold;margin:0;letter-spacing:-0.5px;">PayEase</p>
 <p style="color:rgba(255,255,255,0.7);font-size:13px;margin:6px 0 0 0;">Account Notification</p>
 </td></tr>
-
 <tr><td style="padding:32px;">
 <div style="text-align:center;margin-bottom:24px;">
-  <div style="width:64px;height:64px;border-radius:50%;background:{"#DCFCE7" if "approved" in action or "changed" in action or "updated" in action else "#FEE2E2"};margin:0 auto 14px auto;text-align:center;line-height:64px;font-size:28px;color:{cfg["color"]};">
-    {"&#10003;" if "approved" in action or "changed" in action or "updated" in action else "&#10007;"}
-  </div>
+  <div style="width:64px;height:64px;border-radius:50%;background:{ibg};margin:0 auto 14px auto;text-align:center;line-height:64px;font-size:28px;color:{cfg["color"]};">{icon}</div>
   <h2 style="color:#1A1A2E;font-size:20px;font-weight:bold;margin:0 0 6px 0;">{cfg["title"]}</h2>
   <p style="color:#6B7280;font-size:13px;margin:0;">Account: {full_name}</p>
 </div>
-
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;margin-bottom:20px;">
 <tr style="background:#F3F4F6;">
   <td colspan="2" style="padding:12px 16px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.8px;">Activity Details</td>
@@ -185,21 +185,16 @@ def send_confirmation_email(email, full_name, action, extra_info=''):
   <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{now}</td>
 </tr>
 </table>
-
-<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:16px;margin-bottom:{"16px" if cfg["warning"] else "0"};">
+<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:16px;">
 <p style="color:#15803D;font-size:13px;line-height:1.7;margin:0;">{cfg["message"]}</p>
 </div>
-
-{"<div style='background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:16px;margin-top:16px;'><p style='color:#92400E;font-size:12px;font-weight:700;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:0.5px;'>Security Notice</p><p style='color:#78350F;font-size:13px;margin:0;line-height:1.6;'>" + cfg["warning"] + "</p></div>" if cfg["warning"] else ""}
-
+{warn_html}
 </td></tr>
-
 <tr><td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 32px;text-align:center;">
 <p style="color:#1A73E8;font-size:15px;font-weight:bold;margin:0 0 4px 0;">PayEase</p>
 <p style="color:#9CA3AF;font-size:11px;margin:0;">payease.space &nbsp;|&nbsp; support@payease.space</p>
 <p style="color:#9CA3AF;font-size:10px;margin:6px 0 0 0;">This is an automated message. Please do not reply to this email.</p>
 </td></tr>
-
 </table>
 </td></tr>
 </table>
@@ -220,7 +215,6 @@ def send_confirmation_email(email, full_name, action, extra_info=''):
             "subject": subjects.get(action, 'Account Update — PayEase'),
             "html":    html,
         })
-        print(f"Confirmation email sent to {email} for {action}")
         return True
     except Exception as e:
         print(f"Confirmation email failed: {e}")
@@ -231,7 +225,6 @@ def send_confirmation_email(email, full_name, action, extra_info=''):
 # OTP ROUTES
 # ──────────────────────────────────────────
 
-# 5 per 15 minutes — prevents OTP spam per user
 @otp_bp.route('/send', methods=['POST'])
 @jwt_required()
 @limiter.limit("5 per 15 minutes")
@@ -239,16 +232,12 @@ def send_otp():
     user_id = get_jwt_identity()
     user    = User.query.get(user_id)
     data    = request.get_json()
-    purpose = data.get('purpose')
+    purpose = clean_purpose(data.get('purpose', ''))
 
     if not purpose:
-        return jsonify({'error': 'Purpose is required'}), 400
+        return jsonify({'error': 'Invalid or missing purpose'}), 400
     if not user:
         return jsonify({'error': 'User not found'}), 404
-
-    valid_purposes = ['change_password', 'change_pin', 'update_profile']
-    if purpose not in valid_purposes:
-        return jsonify({'error': 'Invalid purpose'}), 400
 
     otp = generate_otp()
     otp_store[f"{user_id}_{purpose}"] = {
@@ -264,7 +253,6 @@ def send_otp():
     }), 200
 
 
-# 5 per hour — prevents brute force on password change
 @otp_bp.route('/change-password', methods=['POST'])
 @jwt_required()
 @limiter.limit("5 per hour")
@@ -272,13 +260,13 @@ def change_password():
     user_id      = get_jwt_identity()
     user         = User.query.get(user_id)
     data         = request.get_json()
-    new_password = data.get('new_password')
-    otp          = data.get('otp')
+    new_password = clean_password(data.get('new_password', ''))
+    otp          = clean_otp(data.get('otp', ''))
 
-    if not new_password or not otp:
-        return jsonify({'error': 'Password and OTP required'}), 400
-    if len(new_password) < 6:
-        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    err = validate_password(new_password)
+    if err: return jsonify({'error': err}), 400
+    err = validate_otp(otp)
+    if err: return jsonify({'error': err}), 400
 
     key    = f"{user_id}_change_password"
     stored = otp_store.get(key)
@@ -294,15 +282,12 @@ def change_password():
     user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     db.session.commit()
 
-    try:
-        send_confirmation_email(user.email, user.full_name, 'password_changed')
-    except Exception as e:
-        print(f"Confirmation email error: {e}")
+    try: send_confirmation_email(user.email, user.full_name, 'password_changed')
+    except Exception as e: print(f"Confirmation email error: {e}")
 
     return jsonify({'message': 'Password changed successfully'}), 200
 
 
-# 5 per hour — prevents brute force on PIN change
 @otp_bp.route('/change-pin', methods=['POST'])
 @jwt_required()
 @limiter.limit("5 per hour")
@@ -310,13 +295,13 @@ def change_pin():
     user_id = get_jwt_identity()
     user    = User.query.get(user_id)
     data    = request.get_json()
-    new_pin = data.get('new_pin')
-    otp     = data.get('otp')
+    new_pin = clean_pin(str(data.get('new_pin', '')))
+    otp     = clean_otp(data.get('otp', ''))
 
-    if not new_pin or not otp:
-        return jsonify({'error': 'PIN and OTP required'}), 400
-    if len(str(new_pin)) != 4 or not str(new_pin).isdigit():
-        return jsonify({'error': 'PIN must be exactly 4 digits'}), 400
+    err = validate_pin(new_pin)
+    if err: return jsonify({'error': err}), 400
+    err = validate_otp(otp)
+    if err: return jsonify({'error': err}), 400
 
     key    = f"{user_id}_change_pin"
     stored = otp_store.get(key)
@@ -329,18 +314,15 @@ def change_pin():
         return jsonify({'error': 'Invalid OTP. Please try again.'}), 400
 
     del otp_store[key]
-    user.pin = bcrypt.hashpw(str(new_pin).encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    user.pin = bcrypt.hashpw(new_pin.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     db.session.commit()
 
-    try:
-        send_confirmation_email(user.email, user.full_name, 'pin_changed')
-    except Exception as e:
-        print(f"Confirmation email error: {e}")
+    try: send_confirmation_email(user.email, user.full_name, 'pin_changed')
+    except Exception as e: print(f"Confirmation email error: {e}")
 
     return jsonify({'message': 'PIN changed successfully'}), 200
 
 
-# 5 per hour — prevents profile update spam
 @otp_bp.route('/update-profile', methods=['POST'])
 @jwt_required()
 @limiter.limit("5 per hour")
@@ -348,25 +330,18 @@ def update_profile():
     user_id   = get_jwt_identity()
     user      = User.query.get(user_id)
     data      = request.get_json()
-    otp       = data.get('otp', '').strip()
-    full_name = data.get('full_name', '').strip()
-    phone     = data.get('phone', '').strip()
+    otp       = clean_otp(data.get('otp', ''))
+    full_name = clean_name(data.get('full_name', ''))
+    phone     = clean_phone(data.get('phone', ''))
 
-    if not otp:
-        return jsonify({'error': 'OTP is required'}), 400
-    if not full_name:
-        return jsonify({'error': 'Full name is required'}), 400
-    if not phone:
-        return jsonify({'error': 'Phone number is required'}), 400
+    err = validate_otp(otp)
+    if err: return jsonify({'error': err}), 400
+    err = validate_name(full_name)
+    if err: return jsonify({'error': err}), 400
+    err = validate_phone(phone)
+    if err: return jsonify({'error': err}), 400
 
-    if not all(c.isalpha() or c.isspace() for c in full_name):
-        return jsonify({'error': 'Full name must contain only letters and spaces'}), 400
-
-    clean_phone = phone.replace(' ', '').replace('-', '')
-    if not clean_phone.isdigit() or not (10 <= len(clean_phone) <= 13):
-        return jsonify({'error': 'Enter a valid phone number (10-13 digits)'}), 400
-
-    existing = User.query.filter_by(phone=clean_phone).first()
+    existing = User.query.filter_by(phone=phone).first()
     if existing and existing.id != int(user_id):
         return jsonify({'error': 'This phone number is already registered to another account'}), 409
 
@@ -381,11 +356,9 @@ def update_profile():
         return jsonify({'error': 'Invalid OTP. Please try again.'}), 400
 
     del otp_store[key]
-
-    old_name  = user.full_name
-    old_phone = user.phone
+    old_name, old_phone = user.full_name, user.phone
     user.full_name = full_name
-    user.phone     = clean_phone
+    user.phone     = phone
 
     try:
         db.session.commit()
@@ -395,12 +368,9 @@ def update_profile():
 
     try:
         changes = []
-        if old_name != full_name:
-            changes.append(f'Name changed from "{old_name}" to "{full_name}"')
-        if old_phone != clean_phone:
-            changes.append(f'Phone changed from "{old_phone}" to "{clean_phone}"')
-        extra = '. '.join(changes) if changes else ''
-        send_confirmation_email(user.email, user.full_name, 'profile_updated', extra)
+        if old_name  != full_name: changes.append(f'Name: "{old_name}" → "{full_name}"')
+        if old_phone != phone:     changes.append(f'Phone: "{old_phone}" → "{phone}"')
+        send_confirmation_email(user.email, user.full_name, 'profile_updated', '. '.join(changes))
     except Exception as e:
         print(f"Confirmation email error: {e}")
 
@@ -411,15 +381,14 @@ def update_profile():
     }), 200
 
 
-# 3 per 15 minutes — prevents forgot password OTP spam
 @otp_bp.route('/forgot-password/send', methods=['POST'])
 @limiter.limit("3 per 15 minutes")
 def forgot_password_send():
     data  = request.get_json()
-    email = data.get('email', '').strip().lower()
+    email = clean_email(data.get('email', ''))
 
-    if not email:
-        return jsonify({'error': 'Email is required'}), 400
+    err = validate_email(email)
+    if err: return jsonify({'error': err}), 400
 
     user = User.query.filter_by(email=email).first()
     if not user:
@@ -439,19 +408,20 @@ def forgot_password_send():
     }), 200
 
 
-# 5 per hour — prevents brute force on reset
 @otp_bp.route('/forgot-password/reset', methods=['POST'])
 @limiter.limit("5 per hour")
 def forgot_password_reset():
     data         = request.get_json()
-    email        = data.get('email', '').strip().lower()
-    otp          = data.get('otp', '').strip()
-    new_password = data.get('new_password', '')
+    email        = clean_email(data.get('email', ''))
+    otp          = clean_otp(data.get('otp', ''))
+    new_password = clean_password(data.get('new_password', ''))
 
-    if not email or not otp or not new_password:
-        return jsonify({'error': 'All fields are required'}), 400
-    if len(new_password) < 6:
-        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    err = validate_email(email)
+    if err: return jsonify({'error': err}), 400
+    err = validate_otp(otp)
+    if err: return jsonify({'error': err}), 400
+    err = validate_password(new_password)
+    if err: return jsonify({'error': err}), 400
 
     key    = f"forgot_{email}"
     stored = otp_store.get(key)
@@ -464,7 +434,6 @@ def forgot_password_reset():
         return jsonify({'error': 'Invalid OTP. Please try again.'}), 400
 
     del otp_store[key]
-
     user = User.query.filter_by(email=email).first()
     if not user:
         return jsonify({'error': 'User not found'}), 404
@@ -472,9 +441,7 @@ def forgot_password_reset():
     user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     db.session.commit()
 
-    try:
-        send_confirmation_email(user.email, user.full_name, 'password_changed')
-    except Exception as e:
-        print(f"Confirmation email error: {e}")
+    try: send_confirmation_email(user.email, user.full_name, 'password_changed')
+    except Exception as e: print(f"Confirmation email error: {e}")
 
     return jsonify({'message': 'Password reset successfully'}), 200

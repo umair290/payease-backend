@@ -20,7 +20,7 @@ SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 
 # ──────────────────────────────────────────
-# EMAIL FUNCTIONS — all unchanged
+# EMAIL FUNCTIONS
 # ──────────────────────────────────────────
 
 def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender_wallet, receiver_wallet_num):
@@ -290,13 +290,30 @@ def get_balance():
 @jwt_required()
 @limiter.limit("10 per hour")
 def deposit():
-    user_id = get_jwt_identity()
-    data    = request.get_json()
-    amount  = clean_amount(data.get("amount"))
+    user_id         = get_jwt_identity()
+    data            = request.get_json()
+    amount          = clean_amount(data.get("amount"))
+    idempotency_key = clean(data.get("idempotency_key", ""), 64)
+
     if amount is None:
         return jsonify({"error": "Invalid amount"}), 400
     if amount > 500000:
         return jsonify({"error": "Deposit exceeds maximum allowed amount"}), 400
+
+    # ── Idempotency check ──
+    if idempotency_key:
+        existing = Transaction.query.filter_by(
+            idempotency_key = idempotency_key,
+            user_id         = user_id,
+            type            = 'deposit'
+        ).first()
+        if existing:
+            wallet = Wallet.query.filter_by(user_id=user_id).first()
+            return jsonify({
+                "message":     "Deposit successful!",
+                "new_balance": round(float(wallet.balance), 2),
+                "duplicate":   True
+            }), 200
 
     try:
         wallet = Wallet.query.filter_by(user_id=user_id).with_for_update().first()
@@ -305,8 +322,14 @@ def deposit():
 
         wallet.balance += amount
         txn = Transaction(
-            user_id=user_id, from_wallet=None, to_wallet=wallet.wallet_number,
-            amount=amount, type="deposit", direction="credit", description="Deposit"
+            user_id         = user_id,
+            from_wallet     = None,
+            to_wallet       = wallet.wallet_number,
+            amount          = amount,
+            type            = "deposit",
+            direction       = "credit",
+            description     = "Deposit",
+            idempotency_key = idempotency_key or None
         )
         db.session.add(txn)
         db.session.commit()
@@ -318,7 +341,10 @@ def deposit():
         except Exception as e:
             print(f"Notification error: {e}")
 
-        return jsonify({"message": "Deposit successful!", "new_balance": round(float(wallet.balance), 2)}), 200
+        return jsonify({
+            "message":     "Deposit successful!",
+            "new_balance": round(float(wallet.balance), 2)
+        }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -335,6 +361,7 @@ def send_money():
     amount           = clean_amount(data.get("amount"))
     description      = clean_description(data.get("description", "Transfer"), 200)
     pin              = clean_pin(str(data.get("pin", "")))
+    idempotency_key  = clean(data.get("idempotency_key", ""), 64)
 
     if not to_wallet_number:
         return jsonify({"error": "Recipient wallet is required"}), 400
@@ -348,6 +375,24 @@ def send_money():
         return jsonify({"error": "PIN must be 4 digits"}), 400
     if not description:
         description = "Transfer"
+
+    # ── Idempotency check — before PIN or any DB writes ──
+    if idempotency_key:
+        existing = Transaction.query.filter_by(
+            idempotency_key = idempotency_key,
+            user_id         = user_id,
+            type            = 'transfer',
+            direction       = 'debit'
+        ).first()
+        if existing:
+            wallet = Wallet.query.filter_by(user_id=user_id).first()
+            return jsonify({
+                "message":     "Money sent successfully!",
+                "amount":      float(existing.amount),
+                "to_wallet":   existing.to_wallet,
+                "new_balance": round(float(wallet.balance), 2),
+                "duplicate":   True
+            }), 200
 
     user        = User.query.get(user_id)
     sender_user = user
@@ -406,17 +451,29 @@ def send_money():
             db.session.rollback()
             return jsonify({"error": "Wallet error. Please try again."}), 500
 
+        # ── Final balance check AFTER lock ──
         if float(sender.balance) < amount:
             db.session.rollback()
             return jsonify({"error": "Insufficient balance"}), 400
 
-        sender.balance   -= amount
+        # ── Guard against negative balance (extra safety net) ──
+        new_sender_balance = float(sender.balance) - amount
+        if new_sender_balance < 0:
+            db.session.rollback()
+            return jsonify({"error": "Insufficient balance"}), 400
+
+        sender.balance   = new_sender_balance
         receiver.balance += amount
 
         txn_debit = Transaction(
-            user_id=user_id, from_wallet=sender.wallet_number,
-            to_wallet=to_wallet_number, amount=amount,
-            type="transfer", direction="debit", description=description
+            user_id         = user_id,
+            from_wallet     = sender.wallet_number,
+            to_wallet       = to_wallet_number,
+            amount          = amount,
+            type            = "transfer",
+            direction       = "debit",
+            description     = description,
+            idempotency_key = idempotency_key or None
         )
         db.session.add(txn_debit)
         db.session.flush()
@@ -424,9 +481,13 @@ def send_money():
         ref = f"TXN-{str(txn_debit.id).zfill(6)}-{str(int(datetime.utcnow().timestamp()))[-6:]}"
 
         db.session.add(Transaction(
-            user_id=receiver.user_id, from_wallet=sender.wallet_number,
-            to_wallet=to_wallet_number, amount=amount,
-            type="transfer", direction="credit", description=description
+            user_id     = receiver.user_id,
+            from_wallet = sender.wallet_number,
+            to_wallet   = to_wallet_number,
+            amount      = amount,
+            type        = "transfer",
+            direction   = "credit",
+            description = description
         ))
         db.session.commit()
 
@@ -457,7 +518,6 @@ def send_money():
         return jsonify({"error": str(e)}), 500
 
 
-# ── PAGINATED transaction history ──
 @account_bp.route("/transactions", methods=["GET"])
 @jwt_required()
 def transaction_history():
@@ -466,27 +526,24 @@ def transaction_history():
     if not wallet:
         return jsonify({"error": "Wallet not found"}), 404
 
-    # ── Pagination params ──
     page      = max(request.args.get('page',     1,   type=int), 1)
     per_page  = min(max(request.args.get('per_page', 20, type=int), 1), 100)
     tx_type   = request.args.get('type',      None)
     direction = request.args.get('direction', None)
 
-    # ── Base query ──
     query = Transaction.query.filter(
         (Transaction.from_wallet == wallet.wallet_number) |
         (Transaction.to_wallet   == wallet.wallet_number)
     )
 
-    # ── Optional filters ──
     if tx_type:
         query = query.filter(Transaction.type == tx_type)
     if direction:
         query = query.filter(Transaction.direction == direction)
 
-    query      = query.order_by(Transaction.created_at.desc())
-    total      = query.count()
-    records    = query.offset((page - 1) * per_page).limit(per_page).all()
+    query   = query.order_by(Transaction.created_at.desc())
+    total   = query.count()
+    records = query.offset((page - 1) * per_page).limit(per_page).all()
 
     result = []
     for txn in records:

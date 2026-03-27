@@ -5,6 +5,8 @@ from models import User, Wallet, Transaction, KYC
 from datetime import datetime
 import os
 import resend
+from utils.encryption import encrypt_field, decrypt_field
+from utils.sanitize import clean, clean_name, clean_phone, clean_cnic, clean_date
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -12,7 +14,7 @@ resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K
 SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 # ── In-memory logs store ──
-activity_logs  = []
+activity_logs   = []
 change_requests = []
 
 
@@ -22,33 +24,58 @@ def is_admin(user_id):
 
 
 def add_log(user_id, action, detail, ip='N/A'):
-    """Add activity log entry"""
     user = User.query.get(user_id)
     activity_logs.append({
-        'id':        len(activity_logs) + 1,
-        'user_id':   user_id,
-        'user_name': user.full_name if user else 'Unknown',
-        'user_email': user.email if user else 'Unknown',
-        'action':    action,
-        'detail':    detail,
-        'ip':        ip,
-        'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+        'id':         len(activity_logs) + 1,
+        'user_id':    user_id,
+        'user_name':  user.full_name if user else 'Unknown',
+        'user_email': user.email     if user else 'Unknown',
+        'action':     action,
+        'detail':     detail,
+        'ip':         ip,
+        'timestamp':  datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
     })
-    # Keep only last 500 logs
     if len(activity_logs) > 500:
         activity_logs.pop(0)
 
 
+def kyc_to_dict_decrypted(kyc, user):
+    """Return KYC dict with sensitive fields decrypted for admin view."""
+    return {
+        'id':                kyc.id,
+        'user_id':           kyc.user_id,
+        'cnic_number':       decrypt_field(kyc.cnic_number),
+        'full_name_on_card': decrypt_field(kyc.full_name_on_card) if kyc.full_name_on_card else '',
+        'date_of_birth':     decrypt_field(kyc.date_of_birth)     if kyc.date_of_birth     else '',
+        'cnic_front':        kyc.cnic_front,
+        'cnic_back':         kyc.cnic_back,
+        'selfie':            kyc.selfie,
+        'status':            kyc.status,
+        'rejection_reason':  kyc.rejection_reason,
+        'submitted_at':      str(kyc.submitted_at),
+        'verified_at':       str(kyc.verified_at) if kyc.verified_at else None,
+        'user': {
+            'full_name': user.full_name,
+            'email':     user.email,
+            'phone':     user.phone,
+        }
+    }
+
+
+# ──────────────────────────────────────────
+# EMAIL FUNCTIONS
+# ──────────────────────────────────────────
+
 def send_kyc_email(email, full_name, status, reason=''):
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     if status == 'approved':
-        grad     = 'linear-gradient(135deg,#16A34A,#15803D)'
-        icon     = '&#10003;'
-        icon_bg  = '#DCFCE7'
-        icon_col = '#16A34A'
-        title    = 'KYC Verification Approved'
-        subtitle = 'Your identity has been successfully verified'
-        subject  = 'KYC Verification Approved — PayEase'
+        grad      = 'linear-gradient(135deg,#16A34A,#15803D)'
+        icon      = '&#10003;'
+        icon_bg   = '#DCFCE7'
+        icon_col  = '#16A34A'
+        title     = 'KYC Verification Approved'
+        subtitle  = 'Your identity has been successfully verified'
+        subject   = 'KYC Verification Approved — PayEase'
         body_html = '''
 <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:18px;margin-bottom:20px;">
 <p style="color:#15803D;font-size:14px;font-weight:600;margin:0 0 8px 0;">Your account is now fully verified.</p>
@@ -56,13 +83,13 @@ def send_kyc_email(email, full_name, status, reason=''):
 </div>'''
         warning_html = ''
     else:
-        grad     = 'linear-gradient(135deg,#DC2626,#B91C1C)'
-        icon     = '&#10007;'
-        icon_bg  = '#FEE2E2'
-        icon_col = '#DC2626'
-        title    = 'KYC Verification Rejected'
-        subtitle = 'Your identity verification could not be approved'
-        subject  = 'KYC Verification Rejected — PayEase'
+        grad      = 'linear-gradient(135deg,#DC2626,#B91C1C)'
+        icon      = '&#10007;'
+        icon_bg   = '#FEE2E2'
+        icon_col  = '#DC2626'
+        title     = 'KYC Verification Rejected'
+        subtitle  = 'Your identity verification could not be approved'
+        subject   = 'KYC Verification Rejected — PayEase'
         reason_text = reason if reason else 'Documents were unclear or invalid'
         body_html = f'''
 <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:18px;margin-bottom:20px;">
@@ -170,11 +197,13 @@ If you believe this was a mistake, please contact us at support@payease.space
 
 
 def send_admin_update_email(email, full_name, changes, reason=''):
-    now  = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
+    now          = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     changes_html = ''.join([
         f'<tr style="border-bottom:1px solid #E5E7EB;"><td style="padding:12px 16px;font-size:13px;color:#6B7280;">{k}</td><td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{v}</td></tr>'
         for k, v in changes.items()
     ])
+    reason_html = f"<div style='background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:16px;margin-bottom:20px;'><p style='color:#92400E;font-size:12px;font-weight:700;margin:0 0 4px 0;'>Reason</p><p style='color:#78350F;font-size:13px;margin:0;line-height:1.6;'>{reason}</p></div>" if reason else ""
+
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#F0F4FF;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
@@ -196,10 +225,10 @@ def send_admin_update_email(email, full_name, changes, reason=''):
 {changes_html}
 <tr><td style="padding:12px 16px;font-size:13px;color:#6B7280;">Date and Time</td><td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{now}</td></tr>
 </table>
-{"<div style='background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:16px;margin-bottom:20px;'><p style='color:#92400E;font-size:12px;font-weight:700;margin:0 0 4px 0;'>Reason</p><p style='color:#78350F;font-size:13px;margin:0;line-height:1.6;'>" + reason + "</p></div>" if reason else ""}
+{reason_html}
 <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:16px;">
 <p style="color:#15803D;font-size:13px;margin:0;line-height:1.6;">
-If you did not request this change or believe it is incorrect, please contact support at support@payease.space immediately.
+If you did not request this change or believe it is incorrect, please contact support@payease.space immediately.
 </p>
 </div>
 </td></tr>
@@ -244,7 +273,7 @@ def dashboard():
         "total_transactions": total_transactions,
         "pending_kyc":        pending_kyc,
         "blocked_users":      blocked_users,
-        "total_volume":       round(total_volume, 2)
+        "total_volume":       round(float(total_volume), 2)
     }), 200
 
 
@@ -260,7 +289,8 @@ def get_all_users():
     for user in users:
         wallet    = Wallet.query.filter_by(user_id=user.id).first()
         user_dict = user.to_dict()
-        user_dict["balance"] = round(wallet.balance, 2) if wallet else 0
+        user_dict['balance']       = round(float(wallet.balance), 2) if wallet else 0
+        user_dict['wallet_number'] = wallet.wallet_number if wallet else None
         result.append(user_dict)
 
     return jsonify({"total": len(result), "users": result}), 200
@@ -287,11 +317,8 @@ def block_user():
     db.session.commit()
 
     action = "blocked" if block_status else "unblocked"
-
-    # Log action
     add_log(target_id, f'Account {action}', f'Account was {action} by administrator')
 
-    # Notify user
     try:
         from routes.notifications import add_notification
         add_notification(
@@ -315,7 +342,7 @@ def delete_user():
 
     data      = request.get_json()
     target_id = data.get("user_id")
-    reason    = data.get("reason", "Policy violation")
+    reason    = clean(data.get("reason", "Policy violation"), 500)
 
     if not target_id:
         return jsonify({"error": "User ID is required"}), 400
@@ -326,12 +353,10 @@ def delete_user():
     if target.is_admin:
         return jsonify({"error": "Cannot delete admin accounts"}), 403
 
-    # Store details before deletion
     target_email = target.email
     target_name  = target.full_name
 
     try:
-        # Delete wallet and transactions
         wallet = Wallet.query.filter_by(user_id=target_id).first()
         if wallet:
             Transaction.query.filter(
@@ -340,12 +365,10 @@ def delete_user():
             ).delete(synchronize_session=False)
             db.session.delete(wallet)
 
-        # Delete KYC
         kyc = KYC.query.filter_by(user_id=target_id).first()
         if kyc:
             db.session.delete(kyc)
 
-        # Delete user
         db.session.delete(target)
         db.session.commit()
 
@@ -353,13 +376,11 @@ def delete_user():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-    # Send deletion email
     try:
         send_account_deleted_email(target_email, target_name, reason)
     except Exception as e:
         print(f"Deletion email error: {e}")
 
-    # Log action
     add_log(int(user_id), 'User Deleted', f'Deleted account: {target_email} — Reason: {reason}')
 
     return jsonify({"message": f"User {target_name} deleted successfully"}), 200
@@ -374,7 +395,7 @@ def update_user():
 
     data      = request.get_json()
     target_id = data.get("user_id")
-    reason    = data.get("reason", "Admin correction")
+    reason    = clean(data.get("reason", "Admin correction"), 500)
 
     if not target_id:
         return jsonify({"error": "User ID is required"}), 400
@@ -385,46 +406,48 @@ def update_user():
 
     changes = {}
 
-    # Update user fields
-    if data.get("full_name") and data["full_name"].strip():
+    if data.get("full_name") and clean_name(data["full_name"]):
+        new_name = clean_name(data["full_name"])
         old = target.full_name
-        target.full_name = data["full_name"].strip()
-        if old != target.full_name:
-            changes["Full Name"] = f"{old} → {target.full_name}"
+        target.full_name = new_name
+        if old != new_name:
+            changes["Full Name"] = f"{old} → {new_name}"
 
-    if data.get("phone") and data["phone"].strip():
-        # Check phone not taken
-        existing = User.query.filter_by(phone=data["phone"].strip()).first()
+    if data.get("phone") and clean_phone(data["phone"]):
+        new_phone = clean_phone(data["phone"])
+        existing  = User.query.filter_by(phone=new_phone).first()
         if existing and existing.id != int(target_id):
-            return jsonify({"error": "Phone number already in use by another account"}), 409
+            return jsonify({"error": "Phone number already in use"}), 409
         old = target.phone
-        target.phone = data["phone"].strip()
-        if old != target.phone:
-            changes["Phone"] = f"{old} → {target.phone}"
+        target.phone = new_phone
+        if old != new_phone:
+            changes["Phone"] = f"{old} → {new_phone}"
 
-    # Update KYC fields (DOB, CNIC)
     kyc = KYC.query.filter_by(user_id=target_id).first()
     if kyc:
-        if data.get("date_of_birth") and data["date_of_birth"].strip():
-            old = kyc.date_of_birth or "Not set"
-            kyc.date_of_birth = data["date_of_birth"].strip()
-            if old != kyc.date_of_birth:
-                changes["Date of Birth"] = f"{old} → {kyc.date_of_birth}"
+        if data.get("date_of_birth"):
+            new_dob = clean_date(data["date_of_birth"])
+            if new_dob:
+                old = decrypt_field(kyc.date_of_birth) if kyc.date_of_birth else 'Not set'
+                kyc.date_of_birth = encrypt_field(new_dob)
+                changes["Date of Birth"] = f"{old} → {new_dob}"
 
-        if data.get("cnic_number") and data["cnic_number"].strip():
-            old = kyc.cnic_number or "Not set"
-            kyc.cnic_number = data["cnic_number"].strip()
-            if old != kyc.cnic_number:
-                changes["CNIC Number"] = f"{old} → {kyc.cnic_number}"
+        if data.get("cnic_number"):
+            new_cnic = clean_cnic(data["cnic_number"])
+            if new_cnic:
+                old = decrypt_field(kyc.cnic_number) if kyc.cnic_number else 'Not set'
+                kyc.cnic_number = encrypt_field(new_cnic)
+                changes["CNIC Number"] = f"{old} → {new_cnic}"
 
-        if data.get("full_name_on_card") and data["full_name_on_card"].strip():
-            old = kyc.full_name_on_card or "Not set"
-            kyc.full_name_on_card = data["full_name_on_card"].strip()
-            if old != kyc.full_name_on_card:
-                changes["Name on Card"] = f"{old} → {kyc.full_name_on_card}"
+        if data.get("full_name_on_card"):
+            new_card_name = clean_name(data["full_name_on_card"], 100)
+            if new_card_name:
+                old = decrypt_field(kyc.full_name_on_card) if kyc.full_name_on_card else 'Not set'
+                kyc.full_name_on_card = encrypt_field(new_card_name)
+                changes["Name on Card"] = f"{old} → {new_card_name}"
 
     if not changes:
-        return jsonify({"error": "No changes provided"}), 400
+        return jsonify({"error": "No valid changes provided"}), 400
 
     try:
         db.session.commit()
@@ -432,32 +455,26 @@ def update_user():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-    # Send confirmation email to user
     try:
         send_admin_update_email(target.email, target.full_name, changes, reason)
     except Exception as e:
         print(f"Update email error: {e}")
 
-    # In-app notification
     try:
         from routes.notifications import add_notification
-        change_list = ", ".join(changes.keys())
         add_notification(
             int(target_id),
             'Account Information Updated',
-            f'An administrator has updated your account: {change_list}. A confirmation email has been sent.',
+            f'An administrator has updated your account: {", ".join(changes.keys())}. A confirmation email has been sent.',
             'info', 'admin'
         )
     except Exception as e:
         print(f"Notification error: {e}")
 
-    # Log action
-    add_log(int(user_id), 'User Updated', f'Updated {target.email}: {", ".join(changes.keys())} — Reason: {reason}')
+    add_log(int(user_id), 'User Updated',
+            f'Updated {target.email}: {", ".join(changes.keys())} — Reason: {reason}')
 
-    return jsonify({
-        "message": "User updated successfully",
-        "changes": changes
-    }), 200
+    return jsonify({"message": "User updated successfully", "changes": changes}), 200
 
 
 @admin_bp.route("/logs", methods=["GET"])
@@ -467,8 +484,7 @@ def get_logs():
     if not is_admin(user_id):
         return jsonify({"error": "Admin access required"}), 403
 
-    # Optional filter
-    filter_user = request.args.get("user_id")
+    filter_user   = request.args.get("user_id")
     filter_action = request.args.get("action", "").lower()
 
     logs = activity_logs.copy()
@@ -477,25 +493,17 @@ def get_logs():
     if filter_action:
         logs = [l for l in logs if filter_action in l["action"].lower()]
 
-    # Most recent first
-    logs = list(reversed(logs))
-
-    return jsonify({
-        "total": len(logs),
-        "logs":  logs
-    }), 200
+    return jsonify({"total": len(logs), "logs": list(reversed(logs))}), 200
 
 
 @admin_bp.route("/logs/add", methods=["POST"])
 @jwt_required()
 def log_activity():
-    """Called from frontend to log user actions"""
     user_id = get_jwt_identity()
     data    = request.get_json()
-    action  = data.get("action", "Unknown")
-    detail  = data.get("detail", "")
+    action  = clean(data.get("action", "Unknown"), 100)
+    detail  = clean(data.get("detail", ""),        500)
     ip      = request.headers.get("X-Forwarded-For", request.remote_addr or "Unknown").split(",")[0].strip()
-
     add_log(int(user_id), action, detail, ip)
     return jsonify({"message": "Logged"}), 200
 
@@ -506,24 +514,19 @@ def get_change_requests():
     user_id = get_jwt_identity()
     if not is_admin(user_id):
         return jsonify({"error": "Admin access required"}), 403
-
-    return jsonify({
-        "total":    len(change_requests),
-        "requests": list(reversed(change_requests))
-    }), 200
+    return jsonify({"total": len(change_requests), "requests": list(reversed(change_requests))}), 200
 
 
 @admin_bp.route("/change-requests/submit", methods=["POST"])
 @jwt_required()
 def submit_change_request():
-    """User submits a request for admin to change restricted info"""
     user_id = get_jwt_identity()
     user    = User.query.get(user_id)
     data    = request.get_json()
 
-    field   = data.get("field")
-    value   = data.get("value")
-    reason  = data.get("reason")
+    field  = clean(data.get("field",  ""), 50)
+    value  = clean(data.get("value",  ""), 255)
+    reason = clean(data.get("reason", ""), 500)
 
     if not field or not value or not reason:
         return jsonify({"error": "Field, value, and reason are required"}), 400
@@ -533,14 +536,14 @@ def submit_change_request():
         return jsonify({"error": f"Field '{field}' cannot be changed via request"}), 400
 
     change_requests.append({
-        "id":        len(change_requests) + 1,
-        "user_id":   user_id,
-        "user_name": user.full_name,
-        "user_email": user.email,
-        "field":     field,
-        "new_value": value,
-        "reason":    reason,
-        "status":    "pending",
+        "id":           len(change_requests) + 1,
+        "user_id":      user_id,
+        "user_name":    user.full_name,
+        "user_email":   user.email,
+        "field":        field,
+        "new_value":    value,
+        "reason":       reason,
+        "status":       "pending",
         "submitted_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     })
 
@@ -563,7 +566,6 @@ def approve_change_request():
     if req["status"] != "pending":
         return jsonify({"error": "Request already processed"}), 400
 
-    # Apply the change
     result = update_user_field(req["user_id"], req["field"], req["new_value"])
     if not result:
         return jsonify({"error": "Failed to apply change"}), 500
@@ -571,7 +573,6 @@ def approve_change_request():
     req["status"]       = "approved"
     req["processed_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    # Notify user
     try:
         user = User.query.get(req["user_id"])
         from routes.notifications import add_notification
@@ -581,7 +582,6 @@ def approve_change_request():
             f'Your request to update {req["field"].replace("_", " ").title()} has been approved.',
             'success', 'admin'
         )
-        # Send email
         send_admin_update_email(
             user.email, user.full_name,
             {req["field"].replace("_", " ").title(): req["new_value"]},
@@ -602,15 +602,15 @@ def reject_change_request():
 
     data       = request.get_json()
     request_id = data.get("request_id")
-    reason     = data.get("reason", "Request could not be approved")
+    reason     = clean(data.get("reason", "Request could not be approved"), 500)
 
     req = next((r for r in change_requests if r["id"] == request_id), None)
     if not req:
         return jsonify({"error": "Request not found"}), 404
 
-    req["status"]       = "rejected"
+    req["status"]        = "rejected"
     req["reject_reason"] = reason
-    req["processed_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    req["processed_at"]  = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     try:
         from routes.notifications import add_notification
@@ -627,25 +627,25 @@ def reject_change_request():
 
 
 def update_user_field(user_id, field, value):
-    """Helper to update a single user field"""
+    """Helper to update a single user field — encrypts KYC fields."""
     try:
         user = User.query.get(user_id)
         kyc  = KYC.query.filter_by(user_id=user_id).first()
 
         if field == "full_name" and user:
-            user.full_name = value
+            user.full_name = clean_name(value)
         elif field == "phone" and user:
-            # Check uniqueness
-            existing = User.query.filter_by(phone=value).first()
+            clean_ph = clean_phone(value)
+            existing = User.query.filter_by(phone=clean_ph).first()
             if existing and existing.id != int(user_id):
                 return False
-            user.phone = value
+            user.phone = clean_ph
         elif field == "date_of_birth" and kyc:
-            kyc.date_of_birth = value
+            kyc.date_of_birth     = encrypt_field(clean_date(value))
         elif field == "cnic_number" and kyc:
-            kyc.cnic_number = value
+            kyc.cnic_number       = encrypt_field(clean_cnic(value))
         elif field == "full_name_on_card" and kyc:
-            kyc.full_name_on_card = value
+            kyc.full_name_on_card = encrypt_field(clean_name(value, 100))
 
         db.session.commit()
         return True
@@ -653,7 +653,6 @@ def update_user_field(user_id, field, value):
         db.session.rollback()
         print(f"Update field error: {e}")
         return False
-
 
 
 @admin_bp.route("/kyc/pending", methods=["GET"])
@@ -666,14 +665,9 @@ def pending_kyc():
     kyc_list = KYC.query.filter_by(status="pending").all()
     result   = []
     for kyc in kyc_list:
-        user     = User.query.get(kyc.user_id)
-        kyc_dict = kyc.to_dict()
-        kyc_dict["user"] = {
-            "full_name": user.full_name,
-            "email":     user.email,
-            "phone":     user.phone
-        }
-        result.append(kyc_dict)
+        user = User.query.get(kyc.user_id)
+        # ── Use decrypted version for admin view ──
+        result.append(kyc_to_dict_decrypted(kyc, user))
 
     return jsonify({"total": len(result), "kyc_list": result}), 200
 
@@ -698,19 +692,18 @@ def approve_kyc():
     user.kyc_verified = True
     db.session.commit()
 
-    try:
-        send_kyc_email(user.email, user.full_name, 'approved')
-    except Exception as e:
-        print(f"KYC approval email error: {e}")
+    try: send_kyc_email(user.email, user.full_name, 'approved')
+    except Exception as e: print(f"KYC approval email error: {e}")
 
     try:
         from routes.notifications import add_notification
-        add_notification(user.id, 'KYC Verification Approved', 'Your identity has been verified. You now have full access to all PayEase features.', 'success', 'kyc')
+        add_notification(user.id, 'KYC Verification Approved',
+            'Your identity has been verified. You now have full access to all PayEase features.',
+            'success', 'kyc')
     except Exception as e:
         print(f"KYC notification error: {e}")
 
     add_log(user.id, 'KYC Approved', f'KYC approved for {user.email}')
-
     return jsonify({"message": "KYC approved successfully"}), 200
 
 
@@ -723,9 +716,9 @@ def reject_kyc():
 
     data             = request.get_json()
     kyc_id           = data.get("kyc_id")
-    rejection_reason = data.get("reason", "Documents were unclear or invalid")
+    rejection_reason = clean(data.get("reason", "Documents were unclear or invalid"), 500)
 
-    kyc  = KYC.query.get(kyc_id)
+    kyc = KYC.query.get(kyc_id)
     if not kyc:
         return jsonify({"error": "KYC record not found"}), 404
 
@@ -734,19 +727,18 @@ def reject_kyc():
     user                 = User.query.get(kyc.user_id)
     db.session.commit()
 
-    try:
-        send_kyc_email(user.email, user.full_name, 'rejected', rejection_reason)
-    except Exception as e:
-        print(f"KYC rejection email error: {e}")
+    try: send_kyc_email(user.email, user.full_name, 'rejected', rejection_reason)
+    except Exception as e: print(f"KYC rejection email error: {e}")
 
     try:
         from routes.notifications import add_notification
-        add_notification(user.id, 'KYC Verification Rejected', f'Your KYC was rejected. Reason: {rejection_reason}. Please resubmit with valid documents.', 'error', 'kyc')
+        add_notification(user.id, 'KYC Verification Rejected',
+            f'Your KYC was rejected. Reason: {rejection_reason}. Please resubmit with valid documents.',
+            'error', 'kyc')
     except Exception as e:
         print(f"KYC notification error: {e}")
 
     add_log(user.id, 'KYC Rejected', f'KYC rejected for {user.email} — {rejection_reason}')
-
     return jsonify({"message": "KYC rejected", "reason": rejection_reason}), 200
 
 
@@ -757,7 +749,9 @@ def all_transactions():
     if not is_admin(user_id):
         return jsonify({"error": "Admin access required"}), 403
 
-    transactions = Transaction.query.order_by(Transaction.created_at.desc()).limit(100).all()
+    transactions = Transaction.query.order_by(
+        Transaction.created_at.desc()
+    ).limit(200).all()
 
     return jsonify({
         "total":        len(transactions),

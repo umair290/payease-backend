@@ -12,7 +12,6 @@ import os
 import re
 import resend
 from datetime import datetime, timedelta
-from sqlalchemy.exc import StaleDataError
 
 account_bp = Blueprint("account", __name__)
 
@@ -21,8 +20,9 @@ SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 
 # ──────────────────────────────────────────
-# EMAIL FUNCTIONS (unchanged — keep yours)
+# EMAIL FUNCTIONS
 # ──────────────────────────────────────────
+
 def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender_wallet, receiver_wallet_num):
     now  = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     html = f'''<!DOCTYPE html>
@@ -187,19 +187,19 @@ def send_transfer_email_to_receiver(sender_user, receiver_user, amount, ref, sen
 def send_fraud_alert_email(email, full_name, amount, receiver_name, receiver_wallet, alert_type):
     now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
     if alert_type == 'large_transfer':
-        title   = 'Large Transfer Alert'
+        title    = 'Large Transfer Alert'
         subtitle = f'A large transfer of PKR {amount:,.0f} was made from your account'
-        color   = '#DC2626'
-        grad    = 'linear-gradient(135deg,#DC2626,#B91C1C)'
-        subject = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
-        message = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This exceeds our large transfer threshold of PKR 25,000. If you authorized this, no action is needed. Otherwise, change your PIN and password immediately.'
+        color    = '#DC2626'
+        grad     = 'linear-gradient(135deg,#DC2626,#B91C1C)'
+        subject  = f'Large Transfer Alert — PKR {amount:,.0f} — PayEase Security'
+        message  = f'A transfer of <strong>PKR {amount:,.0f}</strong> was initiated from your PayEase wallet to <strong>{receiver_name}</strong> (Wallet: {receiver_wallet}).<br><br>This exceeds our large transfer threshold of PKR 25,000. If you authorized this, no action is needed. Otherwise, change your PIN and password immediately.'
     else:
-        title   = 'Unusual Activity Detected'
+        title    = 'Unusual Activity Detected'
         subtitle = 'Multiple rapid transfers detected on your account'
-        color   = '#B45309'
-        grad    = 'linear-gradient(135deg,#B45309,#92400E)'
-        subject = 'Unusual Activity Detected — PayEase Security Notice'
-        message = f'Multiple transfers within a short period were detected from your account. Most recent: <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If this was not you, change your PIN and password immediately and contact support@payease.space'
+        color    = '#B45309'
+        grad     = 'linear-gradient(135deg,#B45309,#92400E)'
+        subject  = 'Unusual Activity Detected — PayEase Security Notice'
+        message  = f'Multiple transfers within a short period were detected from your account. Most recent: <strong>PKR {amount:,.0f}</strong> to <strong>{receiver_name}</strong>.<br><br>If this was not you, change your PIN and password immediately and contact support@payease.space'
 
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
@@ -300,7 +300,7 @@ def deposit():
         return jsonify({"error": "Deposit exceeds maximum allowed amount"}), 400
 
     try:
-        # ── ROW LOCK: prevents concurrent deposits corrupting balance ──
+        # ── ROW LOCK ──
         wallet = Wallet.query.filter_by(
             user_id=user_id
         ).with_for_update().first()
@@ -309,7 +309,6 @@ def deposit():
             return jsonify({"error": "Wallet not found"}), 404
 
         wallet.balance += amount
-
         txn = Transaction(
             user_id     = user_id,
             from_wallet = None,
@@ -337,9 +336,6 @@ def deposit():
             "new_balance": round(float(wallet.balance), 2)
         }), 200
 
-    except StaleDataError:
-        db.session.rollback()
-        return jsonify({"error": "Transaction conflict. Please try again."}), 409
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
@@ -371,7 +367,6 @@ def send_money():
     if not description:
         description = "Transfer"
 
-    # ── Load user first (outside lock) ──
     user        = User.query.get(user_id)
     sender_user = user
 
@@ -380,33 +375,27 @@ def send_money():
     if not user.kyc_verified:
         return jsonify({"error": "KYC verification required for transfers"}), 403
 
-    # ── Check self-send before locking ──
     sender_check = Wallet.query.filter_by(user_id=user_id).first()
     if not sender_check:
         return jsonify({"error": "Your wallet not found"}), 404
     if sender_check.wallet_number == to_wallet_number:
         return jsonify({"error": "Cannot send money to yourself"}), 400
 
-    # ── Check receiver exists before locking ──
     receiver_check = Wallet.query.filter_by(wallet_number=to_wallet_number).first()
     if not receiver_check:
         return jsonify({"error": "Recipient wallet not found"}), 404
 
     receiver_user = User.query.get(receiver_check.user_id)
 
-    # ── FRAUD DETECTION (before locking — read-only checks) ──
+    # ── Fraud Detection ──
     try:
         from routes.notifications import add_notification
         if amount >= 25000:
-            add_notification(
-                user_id, 'Large Transfer Alert',
+            add_notification(user_id, 'Large Transfer Alert',
                 f'A transfer of PKR {amount:,.0f} to {receiver_user.full_name} was initiated. If this was not you, change your PIN immediately.',
-                'warning', 'security'
-            )
-            send_fraud_alert_email(
-                user.email, user.full_name, amount,
-                receiver_user.full_name, to_wallet_number, 'large_transfer'
-            )
+                'warning', 'security')
+            send_fraud_alert_email(user.email, user.full_name, amount,
+                receiver_user.full_name, to_wallet_number, 'large_transfer')
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
         recent_count = Transaction.query.filter(
             Transaction.user_id    == user_id,
@@ -414,96 +403,65 @@ def send_money():
             Transaction.created_at >= five_min_ago
         ).count()
         if recent_count >= 3:
-            add_notification(
-                user_id, 'Unusual Activity Detected',
+            add_notification(user_id, 'Unusual Activity Detected',
                 f'{recent_count + 1} transfers in under 5 minutes. If this was not you, contact support.',
-                'warning', 'security'
-            )
-            send_fraud_alert_email(
-                user.email, user.full_name, amount,
-                receiver_user.full_name, to_wallet_number, 'rapid_transfer'
-            )
+                'warning', 'security')
+            send_fraud_alert_email(user.email, user.full_name, amount,
+                receiver_user.full_name, to_wallet_number, 'rapid_transfer')
     except Exception as fraud_err:
         print(f"Fraud detection error: {fraud_err}")
 
     try:
-        # ── ROW LOCK BOTH WALLETS in consistent order (lower id first) ──
-        # Consistent ordering prevents deadlocks when two users
-        # send to each other simultaneously
-        ids_ordered = sorted([int(user_id), receiver_check.user_id])
-
+        # ── ROW LOCK BOTH WALLETS — ordered to prevent deadlocks ──
+        ids_ordered    = sorted([int(user_id), receiver_check.user_id])
         wallets_locked = Wallet.query.filter(
             Wallet.user_id.in_(ids_ordered)
         ).with_for_update().order_by(Wallet.user_id).all()
 
-        sender   = next((w for w in wallets_locked if w.user_id == int(user_id)),         None)
+        sender   = next((w for w in wallets_locked if w.user_id == int(user_id)),           None)
         receiver = next((w for w in wallets_locked if w.user_id == receiver_check.user_id), None)
 
         if not sender or not receiver:
             db.session.rollback()
             return jsonify({"error": "Wallet error. Please try again."}), 500
 
-        # ── Final balance check AFTER lock (balance may have changed) ──
+        # ── Final balance check AFTER lock ──
         if float(sender.balance) < amount:
             db.session.rollback()
             return jsonify({"error": "Insufficient balance"}), 400
 
-        # ── Atomic balance update ──
         sender.balance   -= amount
         receiver.balance += amount
 
         txn_debit = Transaction(
-            user_id     = user_id,
-            from_wallet = sender.wallet_number,
-            to_wallet   = to_wallet_number,
-            amount      = amount,
-            type        = "transfer",
-            direction   = "debit",
-            description = description
+            user_id=user_id, from_wallet=sender.wallet_number,
+            to_wallet=to_wallet_number, amount=amount,
+            type="transfer", direction="debit", description=description
         )
         db.session.add(txn_debit)
         db.session.flush()
 
-        # ── TX ID uses real DB id — consistent with admin dashboard ──
         ref = f"TXN-{str(txn_debit.id).zfill(6)}-{str(int(datetime.utcnow().timestamp()))[-6:]}"
 
         db.session.add(Transaction(
-            user_id     = receiver.user_id,
-            from_wallet = sender.wallet_number,
-            to_wallet   = to_wallet_number,
-            amount      = amount,
-            type        = "transfer",
-            direction   = "credit",
-            description = description
+            user_id=receiver.user_id, from_wallet=sender.wallet_number,
+            to_wallet=to_wallet_number, amount=amount,
+            type="transfer", direction="credit", description=description
         ))
         db.session.commit()
 
-        # ── Notifications (after commit — non-critical) ──
         try:
             from routes.notifications import add_notification
-            add_notification(
-                user_id, 'Transfer Successful',
-                f'PKR {amount:,.0f} sent to {receiver_user.full_name} successfully.',
-                'success', 'send'
-            )
-            add_notification(
-                receiver.user_id, 'Payment Received',
-                f'PKR {amount:,.0f} received from {sender_user.full_name}.',
-                'success', 'receive'
-            )
+            add_notification(user_id, 'Transfer Successful',
+                f'PKR {amount:,.0f} sent to {receiver_user.full_name} successfully.', 'success', 'send')
+            add_notification(receiver.user_id, 'Payment Received',
+                f'PKR {amount:,.0f} received from {sender_user.full_name}.', 'success', 'receive')
         except Exception as e:
             print(f"Notification error: {e}")
 
-        # ── Confirmation emails (after commit — non-critical) ──
         try:
-            send_transfer_email_to_sender(
-                sender_user, receiver_user, amount, ref,
-                sender.wallet_number, to_wallet_number
-            )
-            send_transfer_email_to_receiver(
-                sender_user, receiver_user, amount, ref,
-                sender.wallet_number, to_wallet_number
-            )
+            send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender.wallet_number, to_wallet_number)
+            send_transfer_email_to_receiver(sender_user, receiver_user, amount, ref, sender.wallet_number, to_wallet_number)
         except Exception as e:
             print(f"Transfer email error: {e}")
 
@@ -514,9 +472,6 @@ def send_money():
             "new_balance": round(float(sender.balance), 2)
         }), 200
 
-    except StaleDataError:
-        db.session.rollback()
-        return jsonify({"error": "Transaction conflict. Please try again."}), 409
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500

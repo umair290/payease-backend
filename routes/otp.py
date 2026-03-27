@@ -8,7 +8,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.user import User
 from extensions import db, limiter
 from utils.sanitize import (
-    clean, clean_email, clean_otp, clean_name, clean_phone,
+    clean, clean_email, clean_otp, clean_name, clean_phone, normalize_phone,
     clean_password, clean_pin, clean_reason, clean_purpose,
     VALID_PURPOSES, validate_email, validate_password,
     validate_pin, validate_name, validate_phone, validate_otp
@@ -332,7 +332,7 @@ def update_profile():
     data      = request.get_json()
     otp       = clean_otp(data.get('otp', ''))
     full_name = clean_name(data.get('full_name', ''))
-    phone     = clean_phone(data.get('phone', ''))
+    phone     = normalize_phone(data.get('phone', ''))
 
     err = validate_otp(otp)
     if err: return jsonify({'error': err}), 400

@@ -10,7 +10,7 @@ from extensions import db, limiter
 from models import User, Wallet
 from models.token_blocklist import TokenBlocklist
 from utils.sanitize import (
-    clean, clean_name, clean_email, clean_phone,
+    clean, clean_name, clean_email, clean_phone, normalize_phone,
     clean_password, clean_pin, clean_otp,
     validate_email, validate_password, validate_pin,
     validate_phone, validate_name, validate_otp
@@ -176,7 +176,7 @@ def initiate_register():
 
     full_name = clean_name(data.get("full_name", ""))
     email     = clean_email(data.get("email", ""))
-    phone     = clean_phone(data.get("phone", ""))
+    phone     = normalize_phone(data.get("phone", ""))
     password  = clean_password(data.get("password", ""))
     pin       = clean_pin(str(data.get("pin", "")))
 

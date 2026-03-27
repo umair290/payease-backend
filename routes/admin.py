@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import User, Wallet, Transaction, KYC
+from models.audit_log import AuditLog
 from datetime import datetime
 import os
 import resend
@@ -13,8 +14,7 @@ admin_bp = Blueprint("admin", __name__)
 resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
 SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
-# ── In-memory logs store ──
-activity_logs   = []
+# ── Change requests still in-memory (no sensitive data) ──
 change_requests = []
 
 
@@ -23,24 +23,31 @@ def is_admin(user_id):
     return user and user.is_admin
 
 
-def add_log(user_id, action, detail, ip='N/A'):
-    user = User.query.get(user_id)
-    activity_logs.append({
-        'id':         len(activity_logs) + 1,
-        'user_id':    user_id,
-        'user_name':  user.full_name if user else 'Unknown',
-        'user_email': user.email     if user else 'Unknown',
-        'action':     action,
-        'detail':     detail,
-        'ip':         ip,
-        'timestamp':  datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-    })
-    if len(activity_logs) > 500:
-        activity_logs.pop(0)
+def add_log(user_id, action, detail, ip='N/A', admin_id=None, user_agent=None):
+    """
+    Persist audit log to PostgreSQL.
+    Falls back silently — never breaks the main flow.
+    """
+    try:
+        log = AuditLog(
+            user_id    = user_id,
+            admin_id   = admin_id,
+            action     = str(action)[:100],
+            detail     = str(detail)[:2000] if detail else None,
+            ip         = str(ip)[:45]       if ip and ip != 'N/A' else None,
+            user_agent = str(user_agent)[:255] if user_agent else None,
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        print(f"Audit log error (non-critical): {e}")
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
 
 def kyc_to_dict_decrypted(kyc, user):
-    """Return KYC dict with sensitive fields decrypted for admin view."""
     return {
         'id':                kyc.id,
         'user_id':           kyc.user_id,
@@ -134,10 +141,8 @@ def send_kyc_email(email, full_name, status, reason=''):
 
     try:
         resend.Emails.send({
-            "from":    f"PayEase <{SENDER_EMAIL}>",
-            "to":      [email],
-            "subject": subject,
-            "html":    html,
+            "from": f"PayEase <{SENDER_EMAIL}>", "to": [email],
+            "subject": subject, "html": html,
         })
         return True
     except Exception as e:
@@ -170,7 +175,7 @@ def send_account_deleted_email(email, full_name, reason=''):
 <tr style="border-bottom:1px solid #E5E7EB;"><td style="padding:12px 16px;font-size:13px;color:#6B7280;">Reason</td><td style="padding:12px 16px;font-size:13px;font-weight:600;color:#DC2626;text-align:right;">{reason if reason else "Policy violation"}</td></tr>
 <tr><td style="padding:12px 16px;font-size:13px;color:#6B7280;">Date and Time</td><td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;text-align:right;">{now}</td></tr>
 </table>
-<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:16px;margin-bottom:20px;">
+<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:16px;">
 <p style="color:#7F1D1D;font-size:13px;margin:0;line-height:1.7;">
 Your PayEase account and all associated data have been permanently deleted by an administrator.
 If you believe this was a mistake, please contact us at support@payease.space
@@ -185,10 +190,8 @@ If you believe this was a mistake, please contact us at support@payease.space
 
     try:
         resend.Emails.send({
-            "from":    f"PayEase <{SENDER_EMAIL}>",
-            "to":      [email],
-            "subject": "Account Deleted — PayEase",
-            "html":    html,
+            "from": f"PayEase <{SENDER_EMAIL}>", "to": [email],
+            "subject": "Account Deleted — PayEase", "html": html,
         })
         return True
     except Exception as e:
@@ -240,10 +243,8 @@ If you did not request this change or believe it is incorrect, please contact su
 
     try:
         resend.Emails.send({
-            "from":    f"PayEase <{SENDER_EMAIL}>",
-            "to":      [email],
-            "subject": "Account Information Updated by Admin — PayEase",
-            "html":    html,
+            "from": f"PayEase <{SENDER_EMAIL}>", "to": [email],
+            "subject": "Account Information Updated by Admin — PayEase", "html": html,
         })
         return True
     except Exception as e:
@@ -317,13 +318,19 @@ def block_user():
     db.session.commit()
 
     action = "blocked" if block_status else "unblocked"
-    add_log(target_id, f'Account {action}', f'Account was {action} by administrator')
+    ip     = request.headers.get("X-Forwarded-For", request.remote_addr or "Unknown").split(",")[0].strip()
+
+    add_log(
+        target_id, f'Account {action}',
+        f'Account was {action} by administrator',
+        ip       = ip,
+        admin_id = int(user_id)
+    )
 
     try:
         from routes.notifications import add_notification
         add_notification(
-            target_id,
-            f'Account {action.capitalize()}',
+            target_id, f'Account {action.capitalize()}',
             f'Your account has been {action} by an administrator. Contact support if needed.',
             'warning' if block_status else 'success', 'admin'
         )
@@ -355,6 +362,7 @@ def delete_user():
 
     target_email = target.email
     target_name  = target.full_name
+    ip           = request.headers.get("X-Forwarded-For", request.remote_addr or "Unknown").split(",")[0].strip()
 
     try:
         wallet = Wallet.query.filter_by(user_id=target_id).first()
@@ -381,7 +389,12 @@ def delete_user():
     except Exception as e:
         print(f"Deletion email error: {e}")
 
-    add_log(int(user_id), 'User Deleted', f'Deleted account: {target_email} — Reason: {reason}')
+    add_log(
+        int(user_id), 'User Deleted',
+        f'Deleted account: {target_email} — Reason: {reason}',
+        ip       = ip,
+        admin_id = int(user_id)
+    )
 
     return jsonify({"message": f"User {target_name} deleted successfully"}), 200
 
@@ -405,6 +418,7 @@ def update_user():
         return jsonify({"error": "User not found"}), 404
 
     changes = {}
+    ip      = request.headers.get("X-Forwarded-For", request.remote_addr or "Unknown").split(",")[0].strip()
 
     if data.get("full_name") and clean_name(data["full_name"]):
         new_name = clean_name(data["full_name"])
@@ -463,16 +477,19 @@ def update_user():
     try:
         from routes.notifications import add_notification
         add_notification(
-            int(target_id),
-            'Account Information Updated',
+            int(target_id), 'Account Information Updated',
             f'An administrator has updated your account: {", ".join(changes.keys())}. A confirmation email has been sent.',
             'info', 'admin'
         )
     except Exception as e:
         print(f"Notification error: {e}")
 
-    add_log(int(user_id), 'User Updated',
-            f'Updated {target.email}: {", ".join(changes.keys())} — Reason: {reason}')
+    add_log(
+        int(target_id), 'User Updated',
+        f'Updated {target.email}: {", ".join(changes.keys())} — Reason: {reason}',
+        ip       = ip,
+        admin_id = int(user_id)
+    )
 
     return jsonify({"message": "User updated successfully", "changes": changes}), 200
 
@@ -486,25 +503,31 @@ def get_logs():
 
     filter_user   = request.args.get("user_id")
     filter_action = request.args.get("action", "").lower()
+    limit         = min(int(request.args.get("limit", 500)), 1000)
 
-    logs = activity_logs.copy()
+    query = AuditLog.query.order_by(AuditLog.created_at.desc())
+
     if filter_user:
-        logs = [l for l in logs if str(l["user_id"]) == str(filter_user)]
+        query = query.filter(AuditLog.user_id == int(filter_user))
     if filter_action:
-        logs = [l for l in logs if filter_action in l["action"].lower()]
+        query = query.filter(AuditLog.action.ilike(f'%{filter_action}%'))
 
-    return jsonify({"total": len(logs), "logs": list(reversed(logs))}), 200
+    logs = query.limit(limit).all()
+
+    return jsonify({"total": len(logs), "logs": [l.to_dict() for l in logs]}), 200
 
 
 @admin_bp.route("/logs/add", methods=["POST"])
 @jwt_required()
 def log_activity():
-    user_id = get_jwt_identity()
-    data    = request.get_json()
-    action  = clean(data.get("action", "Unknown"), 100)
-    detail  = clean(data.get("detail", ""),        500)
-    ip      = request.headers.get("X-Forwarded-For", request.remote_addr or "Unknown").split(",")[0].strip()
-    add_log(int(user_id), action, detail, ip)
+    user_id    = get_jwt_identity()
+    data       = request.get_json()
+    action     = clean(data.get("action", "Unknown"), 100)
+    detail     = clean(data.get("detail", ""),        500)
+    ip         = request.headers.get("X-Forwarded-For", request.remote_addr or "Unknown").split(",")[0].strip()
+    user_agent = request.headers.get("User-Agent", "")[:255]
+
+    add_log(int(user_id), action, detail, ip=ip, user_agent=user_agent)
     return jsonify({"message": "Logged"}), 200
 
 
@@ -577,8 +600,7 @@ def approve_change_request():
         user = User.query.get(req["user_id"])
         from routes.notifications import add_notification
         add_notification(
-            req["user_id"],
-            'Change Request Approved',
+            req["user_id"], 'Change Request Approved',
             f'Your request to update {req["field"].replace("_", " ").title()} has been approved.',
             'success', 'admin'
         )
@@ -589,6 +611,12 @@ def approve_change_request():
         )
     except Exception as e:
         print(f"Notification error: {e}")
+
+    add_log(
+        req["user_id"], 'Change Request Approved',
+        f'Field {req["field"]} updated to: {req["new_value"]}',
+        admin_id = int(admin_id)
+    )
 
     return jsonify({"message": "Change request approved and applied"}), 200
 
@@ -615,19 +643,23 @@ def reject_change_request():
     try:
         from routes.notifications import add_notification
         add_notification(
-            req["user_id"],
-            'Change Request Rejected',
+            req["user_id"], 'Change Request Rejected',
             f'Your request to update {req["field"].replace("_", " ").title()} was rejected. Reason: {reason}',
             'error', 'admin'
         )
     except Exception as e:
         print(f"Notification error: {e}")
 
+    add_log(
+        req["user_id"], 'Change Request Rejected',
+        f'Request for field {req["field"]} rejected — {reason}',
+        admin_id = int(admin_id)
+    )
+
     return jsonify({"message": "Change request rejected"}), 200
 
 
 def update_user_field(user_id, field, value):
-    """Helper to update a single user field — encrypts KYC fields."""
     try:
         user = User.query.get(user_id)
         kyc  = KYC.query.filter_by(user_id=user_id).first()
@@ -666,7 +698,6 @@ def pending_kyc():
     result   = []
     for kyc in kyc_list:
         user = User.query.get(kyc.user_id)
-        # ── Use decrypted version for admin view ──
         result.append(kyc_to_dict_decrypted(kyc, user))
 
     return jsonify({"total": len(result), "kyc_list": result}), 200
@@ -703,7 +734,11 @@ def approve_kyc():
     except Exception as e:
         print(f"KYC notification error: {e}")
 
-    add_log(user.id, 'KYC Approved', f'KYC approved for {user.email}')
+    add_log(
+        user.id, 'KYC Approved',
+        f'KYC approved for {user.email}',
+        admin_id = int(user_id)
+    )
     return jsonify({"message": "KYC approved successfully"}), 200
 
 
@@ -738,7 +773,11 @@ def reject_kyc():
     except Exception as e:
         print(f"KYC notification error: {e}")
 
-    add_log(user.id, 'KYC Rejected', f'KYC rejected for {user.email} — {rejection_reason}')
+    add_log(
+        user.id, 'KYC Rejected',
+        f'KYC rejected for {user.email} — {rejection_reason}',
+        admin_id = int(user_id)
+    )
     return jsonify({"message": "KYC rejected", "reason": rejection_reason}), 200
 
 

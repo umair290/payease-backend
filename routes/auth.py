@@ -42,7 +42,7 @@ def get_ip(req):
     ip = req.headers.get('X-Forwarded-For', req.remote_addr or 'Unknown')
     return ip.split(',')[0].strip()
 
-# ── Keep all email functions exactly as they are ──
+
 def send_registration_otp_email(email, otp, full_name):
     html_body = f'''<!DOCTYPE html>
 <html>
@@ -174,23 +174,21 @@ def initiate_register():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    # ── Sanitize all inputs ──
     full_name = clean_name(data.get("full_name", ""))
     email     = clean_email(data.get("email", ""))
     phone     = clean_phone(data.get("phone", ""))
     password  = clean_password(data.get("password", ""))
     pin       = clean_pin(str(data.get("pin", "")))
 
-    # ── Validate ──
-    err = validate_name(full_name);     
+    err = validate_name(full_name);    
     if err: return jsonify({"error": err}), 400
-    err = validate_email(email);        
+    err = validate_email(email);       
     if err: return jsonify({"error": err}), 400
-    err = validate_phone(phone);        
+    err = validate_phone(phone);       
     if err: return jsonify({"error": err}), 400
-    err = validate_password(password);  
+    err = validate_password(password); 
     if err: return jsonify({"error": err}), 400
-    err = validate_pin(pin);            
+    err = validate_pin(pin);           
     if err: return jsonify({"error": err}), 400
 
     if User.query.filter_by(email=email).first():
@@ -200,20 +198,15 @@ def initiate_register():
 
     otp = generate_otp()
     registration_otp_store[email] = {
-        "otp":       otp,
-        "full_name": full_name,
-        "email":     email,
-        "phone":     phone,
-        "password":  password,
-        "pin":       pin,
-        "expires":   datetime.utcnow() + timedelta(minutes=5),
+        "otp": otp, "full_name": full_name, "email": email,
+        "phone": phone, "password": password, "pin": pin,
+        "expires": datetime.utcnow() + timedelta(minutes=5),
     }
 
     email_sent = send_registration_otp_email(email, otp, full_name)
     return jsonify({
-        "message":    f"Verification code sent to {email}",
-        "email":      email,
-        "email_sent": email_sent,
+        "message": f"Verification code sent to {email}",
+        "email": email, "email_sent": email_sent,
     }), 200
 
 
@@ -247,19 +240,16 @@ def verify_and_register():
         hashed_pin      = bcrypt.hashpw(stored["pin"].encode("utf-8"),      bcrypt.gensalt()).decode("utf-8")
 
         user = User(
-            full_name = stored["full_name"],
-            email     = stored["email"],
-            phone     = stored["phone"],
-            password  = hashed_password,
-            pin       = hashed_pin,
+            full_name=stored["full_name"], email=stored["email"],
+            phone=stored["phone"], password=hashed_password, pin=hashed_pin,
         )
         db.session.add(user)
         db.session.flush()
 
         wallet = Wallet(
-            user_id       = user.id,
-            wallet_number = generate_wallet_number(),
-            balance       = 0.00
+            user_id=user.id,
+            wallet_number=generate_wallet_number(),
+            balance=0.00
         )
         db.session.add(wallet)
         db.session.commit()
@@ -267,14 +257,17 @@ def verify_and_register():
         try:
             ip  = get_ip(request)
             now = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
-            add_log(user.id, 'Account Created',
-                    f'New account registered — Email: {email} — IP: {ip} — {now}')
+            add_log(
+                user.id, 'Account Created',
+                f'New account registered — Email: {email} — IP: {ip} — {now}',
+                ip = ip
+            )
         except Exception as e:
             print(f"Registration log error: {e}")
 
         del registration_otp_store[email]
         return jsonify({
-            "message":       "Registration successful! Welcome to PayEase!",
+            "message": "Registration successful! Welcome to PayEase!",
             "wallet_number": wallet.wallet_number,
         }), 201
 
@@ -312,7 +305,6 @@ def login():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    # ── Sanitize ──
     email    = clean_email(data.get("email", ""))
     password = clean_password(data.get("password", ""))
 
@@ -329,7 +321,6 @@ def login():
     user_agent = request.headers.get('User-Agent', 'Unknown Device')
     now_str    = datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')
 
-    # ── New device detection ──
     try:
         device_hash   = hashlib.md5(f"{user_agent}{ip_address}".encode()).hexdigest()[:16]
         is_new_device = user.last_device_hash is not None and user.last_device_hash != device_hash
@@ -348,12 +339,16 @@ def login():
 
     try:
         ua_short     = user_agent[:60] + '...' if len(user_agent) > 60 else user_agent
-        # Sanitize location coords — digits, dots, minus only
         latitude     = re.sub(r'[^0-9.\-]', '', str(data.get("latitude",  "")))[:12]
         longitude    = re.sub(r'[^0-9.\-]', '', str(data.get("longitude", "")))[:12]
         location_str = f"Location: {latitude}, {longitude} — " if latitude and longitude else ""
-        add_log(user.id, 'User Login',
-                f'Logged in — IP: {ip_address} — {location_str}Device: {ua_short} — {now_str}')
+        # ── Pass ip and user_agent to DB audit log ──
+        add_log(
+            user.id, 'User Login',
+            f'Logged in — IP: {ip_address} — {location_str}Device: {ua_short} — {now_str}',
+            ip         = ip_address,
+            user_agent = user_agent
+        )
     except Exception as e:
         print(f"Login log error: {e}")
 
@@ -396,7 +391,8 @@ def logout():
         db.session.add(blocked)
         db.session.commit()
         try:
-            add_log(user_id, 'User Logout', 'Logged out — token invalidated')
+            ip = get_ip(request)
+            add_log(user_id, 'User Logout', 'Logged out — token invalidated', ip=ip)
         except Exception:
             pass
         return jsonify({"message": "Logged out successfully"}), 200
@@ -416,7 +412,8 @@ def logout_all():
         db.session.add(blocked)
         db.session.commit()
         try:
-            add_log(user_id, 'Logout All Devices', 'All sessions invalidated by user')
+            ip = get_ip(request)
+            add_log(user_id, 'Logout All Devices', 'All sessions invalidated by user', ip=ip)
         except Exception:
             pass
         return jsonify({"message": "All sessions logged out"}), 200

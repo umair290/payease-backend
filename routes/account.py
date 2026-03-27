@@ -20,7 +20,7 @@ SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
 
 # ──────────────────────────────────────────
-# EMAIL FUNCTIONS
+# EMAIL FUNCTIONS — all unchanged
 # ──────────────────────────────────────────
 
 def send_transfer_email_to_sender(sender_user, receiver_user, amount, ref, sender_wallet, receiver_wallet_num):
@@ -292,49 +292,33 @@ def get_balance():
 def deposit():
     user_id = get_jwt_identity()
     data    = request.get_json()
-
-    amount = clean_amount(data.get("amount"))
+    amount  = clean_amount(data.get("amount"))
     if amount is None:
         return jsonify({"error": "Invalid amount"}), 400
     if amount > 500000:
         return jsonify({"error": "Deposit exceeds maximum allowed amount"}), 400
 
     try:
-        # ── ROW LOCK ──
-        wallet = Wallet.query.filter_by(
-            user_id=user_id
-        ).with_for_update().first()
-
+        wallet = Wallet.query.filter_by(user_id=user_id).with_for_update().first()
         if not wallet:
             return jsonify({"error": "Wallet not found"}), 404
 
         wallet.balance += amount
         txn = Transaction(
-            user_id     = user_id,
-            from_wallet = None,
-            to_wallet   = wallet.wallet_number,
-            amount      = amount,
-            type        = "deposit",
-            direction   = "credit",
-            description = "Deposit"
+            user_id=user_id, from_wallet=None, to_wallet=wallet.wallet_number,
+            amount=amount, type="deposit", direction="credit", description="Deposit"
         )
         db.session.add(txn)
         db.session.commit()
 
         try:
             from routes.notifications import add_notification
-            add_notification(
-                user_id, 'Deposit Successful',
-                f'PKR {amount:,.0f} has been deposited to your wallet.',
-                'success', 'deposit'
-            )
+            add_notification(user_id, 'Deposit Successful',
+                f'PKR {amount:,.0f} has been deposited to your wallet.', 'success', 'deposit')
         except Exception as e:
             print(f"Notification error: {e}")
 
-        return jsonify({
-            "message":     "Deposit successful!",
-            "new_balance": round(float(wallet.balance), 2)
-        }), 200
+        return jsonify({"message": "Deposit successful!", "new_balance": round(float(wallet.balance), 2)}), 200
 
     except Exception as e:
         db.session.rollback()
@@ -356,12 +340,10 @@ def send_money():
         return jsonify({"error": "Recipient wallet is required"}), 400
     err = validate_wallet_number(to_wallet_number)
     if err: return jsonify({"error": err}), 400
-
     if amount is None:
         return jsonify({"error": "Invalid amount"}), 400
     err = validate_amount(amount)
     if err: return jsonify({"error": err}), 400
-
     if not pin or len(pin) != 4:
         return jsonify({"error": "PIN must be 4 digits"}), 400
     if not description:
@@ -412,7 +394,6 @@ def send_money():
         print(f"Fraud detection error: {fraud_err}")
 
     try:
-        # ── ROW LOCK BOTH WALLETS — ordered to prevent deadlocks ──
         ids_ordered    = sorted([int(user_id), receiver_check.user_id])
         wallets_locked = Wallet.query.filter(
             Wallet.user_id.in_(ids_ordered)
@@ -425,7 +406,6 @@ def send_money():
             db.session.rollback()
             return jsonify({"error": "Wallet error. Please try again."}), 500
 
-        # ── Final balance check AFTER lock ──
         if float(sender.balance) < amount:
             db.session.rollback()
             return jsonify({"error": "Insufficient balance"}), 400
@@ -477,23 +457,53 @@ def send_money():
         return jsonify({"error": str(e)}), 500
 
 
+# ── PAGINATED transaction history ──
 @account_bp.route("/transactions", methods=["GET"])
 @jwt_required()
 def transaction_history():
-    user_id      = get_jwt_identity()
-    wallet       = Wallet.query.filter_by(user_id=user_id).first()
+    user_id  = get_jwt_identity()
+    wallet   = Wallet.query.filter_by(user_id=user_id).first()
     if not wallet:
         return jsonify({"error": "Wallet not found"}), 404
-    transactions = Transaction.query.filter(
+
+    # ── Pagination params ──
+    page      = max(request.args.get('page',     1,   type=int), 1)
+    per_page  = min(max(request.args.get('per_page', 20, type=int), 1), 100)
+    tx_type   = request.args.get('type',      None)
+    direction = request.args.get('direction', None)
+
+    # ── Base query ──
+    query = Transaction.query.filter(
         (Transaction.from_wallet == wallet.wallet_number) |
         (Transaction.to_wallet   == wallet.wallet_number)
-    ).order_by(Transaction.created_at.desc()).all()
+    )
+
+    # ── Optional filters ──
+    if tx_type:
+        query = query.filter(Transaction.type == tx_type)
+    if direction:
+        query = query.filter(Transaction.direction == direction)
+
+    query      = query.order_by(Transaction.created_at.desc())
+    total      = query.count()
+    records    = query.offset((page - 1) * per_page).limit(per_page).all()
+
     result = []
-    for txn in transactions:
+    for txn in records:
         txn_dict              = txn.to_dict()
         txn_dict["direction"] = "credit" if txn.to_wallet == wallet.wallet_number else "debit"
         result.append(txn_dict)
-    return jsonify({"wallet_number": wallet.wallet_number, "total": len(result), "transactions": result}), 200
+
+    return jsonify({
+        "wallet_number": wallet.wallet_number,
+        "total":         total,
+        "page":          page,
+        "per_page":      per_page,
+        "total_pages":   (total + per_page - 1) // per_page,
+        "has_next":      page * per_page < total,
+        "has_prev":      page > 1,
+        "transactions":  result
+    }), 200
 
 
 @account_bp.route('/lookup', methods=['POST'])

@@ -1,72 +1,92 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models.user import User
+from models.notification import Notification
 from datetime import datetime
 
 notifications_bp = Blueprint('notifications', __name__)
 
-# In-memory notifications store (will move to DB later)
-notifications_store = {}
 
 def add_notification(user_id, title, message, notif_type='info', icon='bell'):
-    user_id = str(user_id)
-    if user_id not in notifications_store:
-        notifications_store[user_id] = []
-    
-    notification = {
-        'id': len(notifications_store[user_id]) + 1,
-        'title': title,
-        'message': message,
-        'type': notif_type,  # info, success, warning, error
-        'icon': icon,
-        'read': False,
-        'created_at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    }
-    notifications_store[user_id].insert(0, notification)
-    
-    # Keep only last 50 notifications
-    notifications_store[user_id] = notifications_store[user_id][:50]
-    return notification
+    """
+    Call this from any route to create a notification.
+    Keeps last 50 per user — deletes oldest if over limit.
+    """
+    try:
+        notif = Notification(
+            user_id = int(user_id),
+            title   = str(title)[:200],
+            message = str(message),
+            type    = notif_type,
+            icon    = icon,
+            read    = False,
+        )
+        db.session.add(notif)
+        db.session.flush()
+
+        # ── Keep only latest 50 per user ──
+        total = Notification.query.filter_by(user_id=int(user_id)).count()
+        if total > 50:
+            oldest = (
+                Notification.query
+                .filter_by(user_id=int(user_id))
+                .order_by(Notification.created_at.asc())
+                .limit(total - 50)
+                .all()
+            )
+            for old in oldest:
+                db.session.delete(old)
+
+        db.session.commit()
+        return notif
+    except Exception as e:
+        db.session.rollback()
+        print(f"Notification error: {e}")
+        return None
 
 
 @notifications_bp.route('/', methods=['GET'])
 @jwt_required()
 def get_notifications():
-    user_id = str(get_jwt_identity())
-    notifs = notifications_store.get(user_id, [])
-    unread = len([n for n in notifs if not n['read']])
+    user_id = int(get_jwt_identity())
+    notifs  = (
+        Notification.query
+        .filter_by(user_id=user_id)
+        .order_by(Notification.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    unread = sum(1 for n in notifs if not n.read)
     return jsonify({
-        'notifications': notifs,
-        'unread_count': unread
+        'notifications': [n.to_dict() for n in notifs],
+        'unread_count':  unread,
     }), 200
 
 
-@notifications_bp.route('/read/<int:notif_id>', methods=['POST'])
-@jwt_required()
-def mark_read(notif_id):
-    user_id = str(get_jwt_identity())
-    notifs = notifications_store.get(user_id, [])
-    for n in notifs:
-        if n['id'] == notif_id:
-            n['read'] = True
-            break
-    return jsonify({'message': 'Marked as read'}), 200
-
-
-@notifications_bp.route('/read-all', methods=['POST'])
+@notifications_bp.route('/mark-all-read', methods=['POST'])
 @jwt_required()
 def mark_all_read():
-    user_id = str(get_jwt_identity())
-    notifs = notifications_store.get(user_id, [])
-    for n in notifs:
-        n['read'] = True
+    user_id = int(get_jwt_identity())
+    Notification.query.filter_by(user_id=user_id, read=False).update({'read': True})
+    db.session.commit()
     return jsonify({'message': 'All marked as read'}), 200
+
+
+@notifications_bp.route('/<int:notif_id>/read', methods=['POST'])
+@jwt_required()
+def mark_read(notif_id):
+    user_id = int(get_jwt_identity())
+    notif   = Notification.query.filter_by(id=notif_id, user_id=user_id).first()
+    if notif:
+        notif.read = True
+        db.session.commit()
+    return jsonify({'message': 'Marked as read'}), 200
 
 
 @notifications_bp.route('/clear', methods=['DELETE'])
 @jwt_required()
 def clear_notifications():
-    user_id = str(get_jwt_identity())
-    notifications_store[user_id] = []
+    user_id = int(get_jwt_identity())
+    Notification.query.filter_by(user_id=user_id).delete()
+    db.session.commit()
     return jsonify({'message': 'Notifications cleared'}), 200

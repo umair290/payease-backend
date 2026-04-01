@@ -95,6 +95,20 @@ def create_app(config_name="default"):
                         created_at TIMESTAMP DEFAULT NOW() NOT NULL
                     )
                 '''))
+                # In app.py, inside the create_tables() or migrate() function, add:
+                db.session.execute(db.text('''
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        id         SERIAL PRIMARY KEY,
+                        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        title      VARCHAR(200) NOT NULL,
+                        message    TEXT NOT NULL,
+                        type       VARCHAR(50)  DEFAULT 'info',
+                        icon       VARCHAR(50)  DEFAULT 'bell',
+                        read       BOOLEAN      DEFAULT FALSE NOT NULL,
+                        created_at TIMESTAMP    DEFAULT NOW()
+                    )
+                '''))
+
 
                 # ── Indexes ──
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_users_email                ON users(email)'))
@@ -118,7 +132,8 @@ def create_app(config_name="default"):
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_audit_logs_admin_id        ON audit_logs(admin_id)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_audit_logs_action          ON audit_logs(action)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at      ON audit_logs(created_at)'))
-
+                db.session.execute(db.text('CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)'))
+                db.session.execute(db.text('CREATE INDEX IF NOT EXISTS idx_notifications_read    ON notifications(read)'))
                 conn.commit()
                 print("✅ All migrations done!")
 

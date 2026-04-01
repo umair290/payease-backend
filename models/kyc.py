@@ -10,8 +10,8 @@ class KYC(db.Model):
     # Sensitive fields — store as-is for now
     # (encrypt these in a later phase using Fernet)
     cnic_number       = db.Column(db.String(255), unique=True, nullable=False, index=True)
-    full_name_on_card = db.Column(db.String(100), nullable=True)
-    date_of_birth     = db.Column(db.String(20),  nullable=True)
+    full_name_on_card = db.Column(db.String(255), nullable=True)
+    date_of_birth     = db.Column(db.String(255),  nullable=True)
 
     # Cloudinary URLs for uploaded documents
     cnic_front        = db.Column(db.String(500), nullable=True)

@@ -6,4 +6,4 @@ from models.kyc import KYC
 from models.token_blocklist import TokenBlocklist
 from models.audit_log import AuditLog
 from models.notification import Notification
-from backend.models.beneficiary import Beneficiary
+from models.beneficiary import Beneficiary

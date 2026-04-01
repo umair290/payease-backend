@@ -49,10 +49,10 @@ def create_app(config_name="default"):
                 print("Running migrations...")
 
                 # ── KYC columns ──
-                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS full_name_on_card VARCHAR(100)'))
-                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(20)'))
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS full_name_on_card TYPE TEXT'))
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS date_of_birth TYPE TEXT'))
                 conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP'))
-                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(500)'))
+                conn.execute(text('ALTER TABLE kyc ADD COLUMN IF NOT EXISTS rejection_reason TYPE TEXT'))
 
                 # ── User columns ──
                 conn.execute(text('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_device_hash VARCHAR(32)'))
@@ -108,6 +108,19 @@ def create_app(config_name="default"):
                         created_at TIMESTAMP    DEFAULT NOW()
                     )
                 '''))
+                db.session.execute(db.text('''
+                    CREATE TABLE IF NOT EXISTS beneficiaries (
+                        id            SERIAL PRIMARY KEY,
+                        user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        wallet_number VARCHAR(20)  NOT NULL,
+                        full_name     VARCHAR(200) NOT NULL,
+                        phone         VARCHAR(20),
+                        avatar_url    TEXT,
+                        nickname      VARCHAR(100),
+                        created_at    TIMESTAMP DEFAULT NOW(),
+                        CONSTRAINT uq_user_beneficiary UNIQUE (user_id, wallet_number)
+                    )
+                '''))
 
 
                 # ── Indexes ──
@@ -134,6 +147,7 @@ def create_app(config_name="default"):
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at      ON audit_logs(created_at)'))
                 db.session.execute(db.text('CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)'))
                 db.session.execute(db.text('CREATE INDEX IF NOT EXISTS idx_notifications_read    ON notifications(read)'))
+                db.session.execute(db.text('CREATE INDEX IF NOT EXISTS idx_beneficiaries_user_id ON beneficiaries(user_id)'))
                 conn.commit()
                 print("✅ All migrations done!")
 

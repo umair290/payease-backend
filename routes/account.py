@@ -16,7 +16,7 @@ from datetime import datetime
 account_bp = Blueprint("account", __name__)
 
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
+SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', '')
 
 
 # ── Email helpers ──────────────────────────────────────────────

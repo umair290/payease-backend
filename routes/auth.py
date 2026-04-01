@@ -29,8 +29,8 @@ auth_bp = Blueprint("auth", __name__)
 
 registration_otp_store = {}
 
-resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
-SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
+resend.api_key = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', '')
 
 def generate_wallet_number():
     return "PK" + "".join(random.choices(string.digits, k=10))

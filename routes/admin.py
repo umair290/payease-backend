@@ -11,8 +11,8 @@ from utils.sanitize import clean, clean_name, clean_phone, clean_cnic, clean_dat
 
 admin_bp = Blueprint("admin", __name__)
 
-resend.api_key = os.environ.get('RESEND_API_KEY', 're_iEscg1G9_F2ehzTnWiYSXTub3K4fMoWeW')
-SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
+resend.api_key = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', '')
 
 # ── Change requests still in-memory (no sensitive data) ──
 change_requests = []

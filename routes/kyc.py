@@ -14,7 +14,7 @@ from datetime import datetime
 kyc_bp = Blueprint('kyc', __name__)
 
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
+SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', '')
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 MAX_FILE_SIZE      = 5 * 1024 * 1024  # 5MB

@@ -45,7 +45,9 @@ def add_notification(user_id, title, message, notif_type='info', icon='bell'):
         return None
 
 
-@notifications_bp.route('/', methods=['GET'])
+# ── strict_slashes=False fixes the trailing slash mismatch ──
+@notifications_bp.route('/', methods=['GET'], strict_slashes=False)
+@notifications_bp.route('', methods=['GET'])
 @jwt_required()
 def get_notifications():
     user_id = int(get_jwt_identity())

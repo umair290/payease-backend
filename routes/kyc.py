@@ -14,15 +14,41 @@ from datetime import datetime
 kyc_bp = Blueprint('kyc', __name__)
 
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', '')
+SENDER_EMAIL   = os.environ.get('SENDER_EMAIL', 'support@payease.space')
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
-MAX_FILE_SIZE      = 5 * 1024 * 1024  # 5MB
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
+ALLOWED_VIDEO_EXTENSIONS = {'webm', 'mp4', 'mov', 'ogg'}
+MAX_IMAGE_SIZE = 5  * 1024 * 1024   # 5MB
+MAX_VIDEO_SIZE = 50 * 1024 * 1024   # 50MB for video
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def upload_to_cloudinary(file):
+def allowed_image(filename):
+    return '.' in filename and \
+        filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+
+
+def allowed_selfie(filename):
+    """Accept both images and videos for selfie field."""
+    if not filename or '.' not in filename:
+        return True  # blob uploads may have no extension — allow
+    ext = filename.rsplit('.', 1)[1].lower()
+    return ext in ALLOWED_IMAGE_EXTENSIONS | ALLOWED_VIDEO_EXTENSIONS
+
+
+def is_video_file(file):
+    """Detect if uploaded selfie is a video."""
+    filename = file.filename or ''
+    if '.' in filename:
+        ext = filename.rsplit('.', 1)[1].lower()
+        if ext in ALLOWED_VIDEO_EXTENSIONS:
+            return True
+    # Check MIME type as fallback
+    content_type = getattr(file, 'content_type', '') or ''
+    return content_type.startswith('video/')
+
+
+def upload_image_to_cloudinary(file):
+    """Upload CNIC photos as images."""
     cloudinary.config(
         cloud_name = current_app.config['CLOUDINARY_CLOUD_NAME'],
         api_key    = current_app.config['CLOUDINARY_API_KEY'],
@@ -38,6 +64,38 @@ def upload_to_cloudinary(file):
         ]
     )
     return result['secure_url']
+
+
+def upload_selfie_to_cloudinary(file):
+    """
+    Upload selfie — auto-detects image vs video.
+    Videos uploaded with resource_type='video'.
+    Admin panel can then play the liveness video.
+    """
+    cloudinary.config(
+        cloud_name = current_app.config['CLOUDINARY_CLOUD_NAME'],
+        api_key    = current_app.config['CLOUDINARY_API_KEY'],
+        api_secret = current_app.config['CLOUDINARY_API_SECRET'],
+    )
+
+    if is_video_file(file):
+        result = cloudinary.uploader.upload(
+            file,
+            folder        = 'payease/kyc/selfie_videos',
+            resource_type = 'video',
+            # No transformation on video — keep original quality
+        )
+    else:
+        result = cloudinary.uploader.upload(
+            file,
+            folder        = 'payease/kyc',
+            resource_type = 'image',
+            transformation= [
+                {'quality': 'auto', 'fetch_format': 'auto'},
+                {'width': 800, 'crop': 'limit'}
+            ]
+        )
+    return result['secure_url'], is_video_file(file)
 
 
 # ── Email helpers ────────────────────────────────────────────
@@ -157,7 +215,7 @@ Hi <strong>{full_name}</strong>, we were unable to verify your identity at this 
 <p style="color:#334155;font-size:13px;margin:0 0 4px 0;">• Ensure all document photos are clear and readable</p>
 <p style="color:#334155;font-size:13px;margin:0 0 4px 0;">• Verify your CNIC number is entered correctly (13 digits)</p>
 <p style="color:#334155;font-size:13px;margin:0 0 4px 0;">• Take photos in good lighting with all 4 corners visible</p>
-<p style="color:#334155;font-size:13px;margin:0;">• Your selfie must clearly show your face</p>
+<p style="color:#334155;font-size:13px;margin:0;">• Your selfie must clearly show your face during all challenges</p>
 </td></tr>
 </table>
 <div style="text-align:center;">
@@ -214,14 +272,25 @@ def submit_kyc():
     if not cnic_front or not cnic_back or not selfie:
         return jsonify({'error': 'All three documents are required'}), 400
 
-    for label, f in [('ID Front', cnic_front), ('ID Back', cnic_back), ('Selfie', selfie)]:
-        if not allowed_file(f.filename):
+    # ── Validate CNIC images ──
+    for label, f in [('ID Front', cnic_front), ('ID Back', cnic_back)]:
+        if not allowed_image(f.filename):
             return jsonify({'error': f'{label}: only PNG, JPG, JPEG, WEBP allowed'}), 400
         f.seek(0, 2)
         size = f.tell()
         f.seek(0)
-        if size > MAX_FILE_SIZE:
-            return jsonify({'error': f'{label}: file size exceeds 5MB. Images are auto-compressed on upload.'}), 400
+        if size > MAX_IMAGE_SIZE:
+            return jsonify({'error': f'{label}: file size exceeds 5MB'}), 400
+
+    # ── Validate selfie — accepts image OR video ──
+    if not allowed_selfie(selfie.filename):
+        return jsonify({'error': 'Selfie: unsupported file format'}), 400
+    selfie.seek(0, 2)
+    selfie_size = selfie.tell()
+    selfie.seek(0)
+    max_selfie = MAX_VIDEO_SIZE if is_video_file(selfie) else MAX_IMAGE_SIZE
+    if selfie_size > max_selfie:
+        return jsonify({'error': f'Selfie exceeds maximum size limit'}), 400
 
     # ── Check CNIC not already used ──
     all_kyc = KYC.query.all()
@@ -235,9 +304,9 @@ def submit_kyc():
                 pass
 
     try:
-        cnic_front_url = upload_to_cloudinary(cnic_front)
-        cnic_back_url  = upload_to_cloudinary(cnic_back)
-        selfie_url     = upload_to_cloudinary(selfie)
+        cnic_front_url          = upload_image_to_cloudinary(cnic_front)
+        cnic_back_url           = upload_image_to_cloudinary(cnic_back)
+        selfie_url, is_vid      = upload_selfie_to_cloudinary(selfie)
 
         encrypted_cnic = encrypt_field(cnic_number)
         encrypted_name = encrypt_field(full_name_on_card) if full_name_on_card else ''
@@ -277,7 +346,10 @@ def submit_kyc():
         except Exception as e:
             print(f"KYC submit email error: {e}")
 
-        return jsonify({'message': 'KYC submitted successfully! Under review.'}), 201
+        return jsonify({
+            'message':    'KYC submitted successfully! Under review.',
+            'selfie_type': 'video' if is_vid else 'image'
+        }), 201
 
     except Exception as e:
         db.session.rollback()

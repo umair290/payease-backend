@@ -26,6 +26,7 @@ def create_app(config_name="default"):
     from routes.otp           import otp_bp
     from routes.notifications import notifications_bp
     from routes.preferences   import preferences_bp
+    from routes.split         import split_bp
 
     app.register_blueprint(auth_bp,          url_prefix="/api/auth")
     app.register_blueprint(account_bp,       url_prefix="/api/account")
@@ -35,6 +36,7 @@ def create_app(config_name="default"):
     app.register_blueprint(otp_bp,           url_prefix="/api/otp")
     app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
     app.register_blueprint(preferences_bp,   url_prefix="/api/preferences")
+    app.register_blueprint(split_bp,         url_prefix="/api/split")
 
     with app.app_context():
         db.create_all()
@@ -44,7 +46,7 @@ def create_app(config_name="default"):
             with db.engine.connect() as conn:
                 print("Running migrations...")
 
-                # ── KYC columns — ALTER TYPE to TEXT for encrypted values ──
+                # ── KYC columns ──
                 conn.execute(text('ALTER TABLE kyc ALTER COLUMN cnic_number       TYPE TEXT'))
                 conn.execute(text('ALTER TABLE kyc ALTER COLUMN full_name_on_card TYPE TEXT'))
                 conn.execute(text('ALTER TABLE kyc ALTER COLUMN date_of_birth     TYPE TEXT'))
@@ -122,6 +124,36 @@ def create_app(config_name="default"):
                     )
                 '''))
 
+                # ── Bill Split Groups ──
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS bill_split_groups (
+                        id           SERIAL PRIMARY KEY,
+                        title        VARCHAR(200)    NOT NULL,
+                        description  TEXT,
+                        total_amount NUMERIC(12, 2)  NOT NULL,
+                        created_by   INTEGER         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        status       VARCHAR(20)     DEFAULT 'open',
+                        created_at   TIMESTAMP       DEFAULT NOW(),
+                        updated_at   TIMESTAMP       DEFAULT NOW()
+                    )
+                '''))
+
+                # ── Bill Split Members ──
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS bill_split_members (
+                        id            SERIAL PRIMARY KEY,
+                        group_id      INTEGER        NOT NULL REFERENCES bill_split_groups(id) ON DELETE CASCADE,
+                        user_id       INTEGER        REFERENCES users(id) ON DELETE SET NULL,
+                        wallet_number VARCHAR(20)    NOT NULL,
+                        full_name     VARCHAR(200),
+                        avatar_url    TEXT,
+                        share_amount  NUMERIC(12, 2) NOT NULL,
+                        status        VARCHAR(20)    DEFAULT 'pending',
+                        paid_at       TIMESTAMP,
+                        created_at    TIMESTAMP      DEFAULT NOW()
+                    )
+                '''))
+
                 # ── Indexes ──
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_users_email                ON users(email)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_users_phone                ON users(phone)'))
@@ -147,6 +179,11 @@ def create_app(config_name="default"):
                 conn.execute(text('CREATE INDEX IF NOT EXISTS idx_notifications_user_id     ON notifications(user_id)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS idx_notifications_read        ON notifications(read)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS idx_beneficiaries_user_id     ON beneficiaries(user_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_groups_created_by   ON bill_split_groups(created_by)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_groups_status       ON bill_split_groups(status)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_members_group_id    ON bill_split_members(group_id)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_members_wallet      ON bill_split_members(wallet_number)'))
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_members_user_id     ON bill_split_members(user_id)'))
 
                 conn.commit()
                 print("✅ All migrations done!")

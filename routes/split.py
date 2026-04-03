@@ -17,18 +17,18 @@ def _add_notification(user_id, title, message, notif_type='info', icon='bell'):
         print(f"Notification error: {e}")
 
 
-# ── Create a split bill ──────────────────────────────────────────
 @split_bp.route('/create', methods=['POST'])
 @jwt_required()
 def create_split():
     user_id = get_jwt_identity()
     data    = request.get_json()
 
-    title        = (data.get('title') or '').strip()[:200]
-    description  = (data.get('description') or '').strip()[:500]
-    total_amount = data.get('total_amount')
-    members_data = data.get('members', [])   # [{wallet_number, share_amount}]
-    split_type   = data.get('split_type', 'equal')  # equal | custom
+    title             = (data.get('title') or '').strip()[:200]
+    description       = (data.get('description') or '').strip()[:500]
+    total_amount      = data.get('total_amount')
+    members_data      = data.get('members', [])
+    split_type        = data.get('split_type', 'equal')
+    creator_share_amt = data.get('creator_share_amount')
 
     if not title:
         return jsonify({'error': 'Title is required'}), 400
@@ -41,15 +41,14 @@ def create_split():
 
     if not members_data or len(members_data) < 1:
         return jsonify({'error': 'At least 1 member is required'}), 400
-    if len(members_data) > 20:
-        return jsonify({'error': 'Maximum 20 members per split'}), 400
+    if len(members_data) > 19:
+        return jsonify({'error': 'Maximum 19 additional members per split'}), 400
 
-    creator       = User.query.get(user_id)
-    creator_wallet= Wallet.query.filter_by(user_id=user_id).first()
+    creator        = User.query.get(user_id)
+    creator_wallet = Wallet.query.filter_by(user_id=user_id).first()
     if not creator or not creator_wallet:
         return jsonify({'error': 'User not found'}), 404
 
-    # Resolve member wallets — exclude creator
     resolved_members = []
     wallet_numbers   = set()
 
@@ -73,22 +72,42 @@ def create_split():
             'full_name':     member_user.full_name if member_user else wn,
             'avatar_url':    member_user.avatar_url if member_user else None,
             'share_amount':  share_amount,
+            'is_creator':    False,
         })
 
     if not resolved_members:
         return jsonify({'error': 'No valid members found'}), 400
 
-    # Calculate equal split if needed
+    # Total participants = other members + creator
+    total_participants = len(resolved_members) + 1
+
     if split_type == 'equal':
-        per_person = round(total_amount / len(resolved_members), 2)
+        per_person = round(total_amount / total_participants, 2)
         for m in resolved_members:
             m['share_amount'] = per_person
+        creator_share = per_person
+    else:
+        try:
+            creator_share = round(float(creator_share_amt), 2)
+            if creator_share < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Enter a valid amount for your own share'}), 400
 
-    # Validate custom split sums to total
-    if split_type == 'custom':
-        total_shares = sum(m['share_amount'] for m in resolved_members)
+        total_shares = sum(m['share_amount'] for m in resolved_members) + creator_share
         if abs(total_shares - total_amount) > 1:
-            return jsonify({'error': f'Member shares ({total_shares}) must equal total ({total_amount})'}), 400
+            return jsonify({'error': f'All shares including yours ({total_shares:.0f}) must equal total ({total_amount:.0f})'}), 400
+
+    # Creator is first member, auto-paid
+    creator_entry = {
+        'wallet_number': creator_wallet.wallet_number,
+        'user_id':       int(user_id),
+        'full_name':     creator.full_name,
+        'avatar_url':    creator.avatar_url,
+        'share_amount':  creator_share,
+        'is_creator':    True,
+    }
+    all_members = [creator_entry] + resolved_members
 
     try:
         group = BillSplitGroup(
@@ -99,9 +118,9 @@ def create_split():
             status       = 'open',
         )
         db.session.add(group)
-        db.session.flush()  # get group.id
+        db.session.flush()
 
-        for m in resolved_members:
+        for m in all_members:
             member = BillSplitMember(
                 group_id      = group.id,
                 user_id       = m['user_id'],
@@ -109,21 +128,21 @@ def create_split():
                 full_name     = m['full_name'],
                 avatar_url    = m['avatar_url'],
                 share_amount  = m['share_amount'],
-                status        = 'pending',
+                status        = 'paid' if m['is_creator'] else 'pending',
+                paid_at       = datetime.utcnow() if m['is_creator'] else None,
             )
             db.session.add(member)
 
         db.session.commit()
 
-        # Notify all members
         for m in resolved_members:
             if m['user_id']:
                 _add_notification(
                     m['user_id'],
-                    title   = f"Bill Split Request",
-                    message = f"{creator.full_name} added you to '{title}'. Your share: PKR {m['share_amount']:,.0f}",
+                    title      = "Bill Split Request",
+                    message    = f"{creator.full_name} added you to '{title}'. Your share: PKR {m['share_amount']:,.0f}",
                     notif_type = 'info',
-                    icon    = 'split'
+                    icon       = 'split'
                 )
 
         return jsonify({'message': 'Split created', 'group': group.to_dict()}), 201
@@ -133,7 +152,6 @@ def create_split():
         return jsonify({'error': str(e)}), 500
 
 
-# ── List all splits for current user ────────────────────────────
 @split_bp.route('/list', methods=['GET'])
 @jwt_required()
 def list_splits():
@@ -142,10 +160,8 @@ def list_splits():
     if not wallet:
         return jsonify({'error': 'Wallet not found'}), 404
 
-    # Groups I created
     created = BillSplitGroup.query.filter_by(created_by=user_id).order_by(BillSplitGroup.created_at.desc()).all()
 
-    # Groups I'm a member of (but didn't create)
     memberships = (
         BillSplitMember.query
         .filter_by(wallet_number=wallet.wallet_number)
@@ -155,20 +171,14 @@ def list_splits():
     )
     member_group_ids = {m.group_id for m in memberships}
     member_groups    = BillSplitGroup.query.filter(BillSplitGroup.id.in_(member_group_ids)).order_by(BillSplitGroup.created_at.desc()).all()
-
-    # For member groups, attach my share info
-    my_shares = {m.group_id: m for m in memberships}
+    my_shares        = {m.group_id: m for m in memberships}
 
     return jsonify({
         'created': [g.to_dict() for g in created],
-        'member':  [
-            {**g.to_dict(), 'my_share': my_shares[g.id].to_dict()}
-            for g in member_groups
-        ],
+        'member':  [{**g.to_dict(), 'my_share': my_shares[g.id].to_dict()} for g in member_groups],
     }), 200
 
 
-# ── Get single split detail ──────────────────────────────────────
 @split_bp.route('/<int:group_id>', methods=['GET'])
 @jwt_required()
 def get_split(group_id):
@@ -177,7 +187,7 @@ def get_split(group_id):
     if not group:
         return jsonify({'error': 'Split not found'}), 404
 
-    wallet = Wallet.query.filter_by(user_id=user_id).first()
+    wallet     = Wallet.query.filter_by(user_id=user_id).first()
     is_creator = group.created_by == user_id
     is_member  = wallet and any(m.wallet_number == wallet.wallet_number for m in group.members)
 
@@ -187,13 +197,11 @@ def get_split(group_id):
     return jsonify({'group': group.to_dict()}), 200
 
 
-# ── Pay your share ───────────────────────────────────────────────
 @split_bp.route('/pay', methods=['POST'])
 @jwt_required()
 def pay_share():
-    user_id = get_jwt_identity()
-    data    = request.get_json()
-
+    user_id  = get_jwt_identity()
+    data     = request.get_json()
     group_id = data.get('group_id')
     pin      = str(data.get('pin', '')).strip()
 
@@ -217,7 +225,9 @@ def pay_share():
     if group.status == 'settled':
         return jsonify({'error': 'This split is already settled'}), 400
 
-    # Find my membership
+    if group.created_by == int(user_id):
+        return jsonify({'error': 'As the creator your share is already marked as paid'}), 400
+
     my_member = next((m for m in group.members if m.wallet_number == wallet.wallet_number), None)
     if not my_member:
         return jsonify({'error': 'You are not a member of this split'}), 403
@@ -228,14 +238,15 @@ def pay_share():
     if float(wallet.balance) < share:
         return jsonify({'error': 'Insufficient balance'}), 400
 
-    # Get creator wallet to receive the money
-    creator_wallet = Wallet.query.filter_by(user_id=group.created_by).with_for_update().first()
-    if not creator_wallet:
-        return jsonify({'error': 'Creator wallet not found'}), 404
-
     try:
-        # Lock both wallets
-        payer_wallet = Wallet.query.filter_by(user_id=user_id).with_for_update().first()
+        first_id  = min(int(user_id), group.created_by)
+        second_id = max(int(user_id), group.created_by)
+        wallets   = {w.user_id: w for w in Wallet.query.filter(
+            Wallet.user_id.in_([first_id, second_id])
+        ).with_for_update().all()}
+
+        payer_wallet   = wallets[int(user_id)]
+        creator_wallet = wallets[group.created_by]
 
         if float(payer_wallet.balance) < share:
             return jsonify({'error': 'Insufficient balance'}), 400
@@ -243,49 +254,33 @@ def pay_share():
         payer_wallet.balance   = round(float(payer_wallet.balance)   - share, 2)
         creator_wallet.balance = round(float(creator_wallet.balance) + share, 2)
 
-        # Record transaction
         from models import Transaction
-        debit_txn = Transaction(
-            user_id     = user_id,
-            from_wallet = payer_wallet.wallet_number,
-            to_wallet   = creator_wallet.wallet_number,
-            amount      = share,
-            type        = 'transfer',
-            direction   = 'debit',
-            description = f"Bill split: {group.title}",
-            status      = 'completed',
-        )
-        credit_txn = Transaction(
-            user_id     = group.created_by,
-            from_wallet = payer_wallet.wallet_number,
-            to_wallet   = creator_wallet.wallet_number,
-            amount      = share,
-            type        = 'transfer',
-            direction   = 'credit',
-            description = f"Bill split: {group.title}",
-            status      = 'completed',
-        )
-        db.session.add(debit_txn)
-        db.session.add(credit_txn)
+        db.session.add(Transaction(
+            user_id=user_id, from_wallet=payer_wallet.wallet_number,
+            to_wallet=creator_wallet.wallet_number, amount=share,
+            type='transfer', direction='debit',
+            description=f"Bill split: {group.title}", status='completed',
+        ))
+        db.session.add(Transaction(
+            user_id=group.created_by, from_wallet=payer_wallet.wallet_number,
+            to_wallet=creator_wallet.wallet_number, amount=share,
+            type='transfer', direction='credit',
+            description=f"Bill split: {group.title}", status='completed',
+        ))
 
-        # Mark member as paid
         my_member.status  = 'paid'
         my_member.paid_at = datetime.utcnow()
 
-        # Check if all members paid — auto-settle
         if all(m.status == 'paid' for m in group.members):
             group.status = 'settled'
 
         db.session.commit()
 
-        # Notify creator
-        creator = User.query.get(group.created_by)
         _add_notification(
             group.created_by,
-            title   = "Split Payment Received",
-            message = f"{user.full_name} paid their share of PKR {share:,.0f} for '{group.title}'.",
-            notif_type = 'success',
-            icon    = 'receive'
+            title=f"Split Payment Received",
+            message=f"{user.full_name} paid their share of PKR {share:,.0f} for '{group.title}'.",
+            notif_type='success', icon='receive'
         )
 
         return jsonify({
@@ -299,7 +294,6 @@ def pay_share():
         return jsonify({'error': str(e)}), 500
 
 
-# ── Remind unpaid members ────────────────────────────────────────
 @split_bp.route('/remind', methods=['POST'])
 @jwt_required()
 def remind_members():
@@ -314,22 +308,20 @@ def remind_members():
         return jsonify({'error': 'Only the creator can send reminders'}), 403
 
     user    = User.query.get(user_id)
-    pending = [m for m in group.members if m.status == 'pending']
+    pending = [m for m in group.members if m.status == 'pending' and m.user_id != int(user_id)]
 
     for m in pending:
         if m.user_id:
             _add_notification(
                 m.user_id,
-                title   = "Payment Reminder",
-                message = f"{user.full_name} reminded you to pay PKR {float(m.share_amount):,.0f} for '{group.title}'.",
-                notif_type = 'warning',
-                icon    = 'reminder'
+                title=f"Payment Reminder",
+                message=f"{user.full_name} reminded you to pay PKR {float(m.share_amount):,.0f} for '{group.title}'.",
+                notif_type='warning', icon='reminder'
             )
 
     return jsonify({'message': f'Reminder sent to {len(pending)} member(s)'}), 200
 
 
-# ── Settle / close a split manually ─────────────────────────────
 @split_bp.route('/settle', methods=['POST'])
 @jwt_required()
 def settle_split():
@@ -345,11 +337,9 @@ def settle_split():
 
     group.status = 'settled'
     db.session.commit()
-
     return jsonify({'message': 'Split settled', 'group': group.to_dict()}), 200
 
 
-# ── Delete a split ───────────────────────────────────────────────
 @split_bp.route('/<int:group_id>', methods=['DELETE'])
 @jwt_required()
 def delete_split(group_id):

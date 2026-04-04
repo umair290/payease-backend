@@ -27,6 +27,7 @@ def create_app(config_name="default"):
     from routes.notifications import notifications_bp
     from routes.preferences   import preferences_bp
     from routes.split         import split_bp
+    from routes.whitelabel_routes import whitelabel_bp
 
     app.register_blueprint(auth_bp,          url_prefix="/api/auth")
     app.register_blueprint(account_bp,       url_prefix="/api/account")
@@ -37,6 +38,7 @@ def create_app(config_name="default"):
     app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
     app.register_blueprint(preferences_bp,   url_prefix="/api/preferences")
     app.register_blueprint(split_bp,         url_prefix="/api/split")
+    app.register_blueprint(whitelabel_bp, url_prefix="/api/admin")
 
     with app.app_context():
         db.create_all()
@@ -153,6 +155,27 @@ def create_app(config_name="default"):
                         created_at    TIMESTAMP      DEFAULT NOW()
                     )
                 '''))
+                # Add this block inside the migrations try block in backend/app.py
+# After the existing beneficiaries table CREATE block:
+
+                # ── White-label config ──
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS whitelabel_config (
+                        id              SERIAL PRIMARY KEY,
+                        app_name        VARCHAR(100)  DEFAULT 'PayEase',
+                        tagline         VARCHAR(200)  DEFAULT 'Your Digital Wallet',
+                        logo_url        TEXT,
+                        favicon_url     TEXT,
+                        primary_color   VARCHAR(20)   DEFAULT '#1A73E8',
+                        secondary_color VARCHAR(20)   DEFAULT '#7C3AED',
+                        accent_color    VARCHAR(20)   DEFAULT '#16A34A',
+                        features        TEXT          DEFAULT '{}',
+                        support_email   VARCHAR(200)  DEFAULT 'support@payease.space',
+                        website_url     VARCHAR(300)  DEFAULT 'https://payease.space',
+                        updated_by      INTEGER       REFERENCES users(id) ON DELETE SET NULL,
+                        updated_at      TIMESTAMP     DEFAULT NOW()
+                    )
+                '''))
 
                 # ── Indexes ──
                 conn.execute(text('CREATE INDEX IF NOT EXISTS ix_users_email                ON users(email)'))
@@ -184,7 +207,8 @@ def create_app(config_name="default"):
                 conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_members_group_id    ON bill_split_members(group_id)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_members_wallet      ON bill_split_members(wallet_number)'))
                 conn.execute(text('CREATE INDEX IF NOT EXISTS idx_split_members_user_id     ON bill_split_members(user_id)'))
-
+                conn.execute(text('CREATE INDEX IF NOT EXISTS idx_whitelabel_id ON whitelabel_config(id)'))
+                
                 conn.commit()
                 print("✅ All migrations done!")
 

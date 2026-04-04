@@ -8,3 +8,4 @@ from models.audit_log import AuditLog
 from models.notification import Notification
 from models.beneficiary import Beneficiary
 from models.bill_split import BillSplitGroup, BillSplitMember
+from models.whitelabel import WhitelabelConfig

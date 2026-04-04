@@ -796,3 +796,4 @@ def all_transactions():
         "total":        len(transactions),
         "transactions": [t.to_dict() for t in transactions]
     }), 200
+

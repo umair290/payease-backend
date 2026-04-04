@@ -20,7 +20,7 @@ def _add_notification(user_id, title, message, notif_type='info', icon='bell'):
 @split_bp.route('/create', methods=['POST'])
 @jwt_required()
 def create_split():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())  # ← cast to int
     data    = request.get_json()
 
     title             = (data.get('title') or '').strip()[:200]
@@ -78,7 +78,6 @@ def create_split():
     if not resolved_members:
         return jsonify({'error': 'No valid members found'}), 400
 
-    # Total participants = other members + creator
     total_participants = len(resolved_members) + 1
 
     if split_type == 'equal':
@@ -98,10 +97,9 @@ def create_split():
         if abs(total_shares - total_amount) > 1:
             return jsonify({'error': f'All shares including yours ({total_shares:.0f}) must equal total ({total_amount:.0f})'}), 400
 
-    # Creator is first member, auto-paid
     creator_entry = {
         'wallet_number': creator_wallet.wallet_number,
-        'user_id':       int(user_id),
+        'user_id':       user_id,
         'full_name':     creator.full_name,
         'avatar_url':    creator.avatar_url,
         'share_amount':  creator_share,
@@ -155,7 +153,7 @@ def create_split():
 @split_bp.route('/list', methods=['GET'])
 @jwt_required()
 def list_splits():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())  # ← cast to int
     wallet  = Wallet.query.filter_by(user_id=user_id).first()
     if not wallet:
         return jsonify({'error': 'Wallet not found'}), 404
@@ -182,7 +180,7 @@ def list_splits():
 @split_bp.route('/<int:group_id>', methods=['GET'])
 @jwt_required()
 def get_split(group_id):
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())  # ← cast to int
     group   = BillSplitGroup.query.get(group_id)
     if not group:
         return jsonify({'error': 'Split not found'}), 404
@@ -200,7 +198,7 @@ def get_split(group_id):
 @split_bp.route('/pay', methods=['POST'])
 @jwt_required()
 def pay_share():
-    user_id  = get_jwt_identity()
+    user_id  = int(get_jwt_identity())  # ← cast to int
     data     = request.get_json()
     group_id = data.get('group_id')
     pin      = str(data.get('pin', '')).strip()
@@ -225,7 +223,7 @@ def pay_share():
     if group.status == 'settled':
         return jsonify({'error': 'This split is already settled'}), 400
 
-    if group.created_by == int(user_id):
+    if group.created_by == user_id:  # now both ints — works correctly
         return jsonify({'error': 'As the creator your share is already marked as paid'}), 400
 
     my_member = next((m for m in group.members if m.wallet_number == wallet.wallet_number), None)
@@ -239,13 +237,13 @@ def pay_share():
         return jsonify({'error': 'Insufficient balance'}), 400
 
     try:
-        first_id  = min(int(user_id), group.created_by)
-        second_id = max(int(user_id), group.created_by)
+        first_id  = min(user_id, group.created_by)
+        second_id = max(user_id, group.created_by)
         wallets   = {w.user_id: w for w in Wallet.query.filter(
             Wallet.user_id.in_([first_id, second_id])
         ).with_for_update().all()}
 
-        payer_wallet   = wallets[int(user_id)]
+        payer_wallet   = wallets[user_id]
         creator_wallet = wallets[group.created_by]
 
         if float(payer_wallet.balance) < share:
@@ -278,9 +276,10 @@ def pay_share():
 
         _add_notification(
             group.created_by,
-            title=f"Split Payment Received",
-            message=f"{user.full_name} paid their share of PKR {share:,.0f} for '{group.title}'.",
-            notif_type='success', icon='receive'
+            title   = "Split Payment Received",
+            message = f"{user.full_name} paid their share of PKR {share:,.0f} for '{group.title}'.",
+            notif_type = 'success',
+            icon    = 'receive'
         )
 
         return jsonify({
@@ -297,26 +296,27 @@ def pay_share():
 @split_bp.route('/remind', methods=['POST'])
 @jwt_required()
 def remind_members():
-    user_id  = get_jwt_identity()
+    user_id  = int(get_jwt_identity())  # ← cast to int
     data     = request.get_json()
     group_id = data.get('group_id')
 
     group = BillSplitGroup.query.get(group_id)
     if not group:
         return jsonify({'error': 'Split not found'}), 404
-    if group.created_by != user_id:
+    if group.created_by != user_id:  # now both ints — works correctly
         return jsonify({'error': 'Only the creator can send reminders'}), 403
 
     user    = User.query.get(user_id)
-    pending = [m for m in group.members if m.status == 'pending' and m.user_id != int(user_id)]
+    pending = [m for m in group.members if m.status == 'pending' and m.user_id != user_id]
 
     for m in pending:
         if m.user_id:
             _add_notification(
                 m.user_id,
-                title=f"Payment Reminder",
-                message=f"{user.full_name} reminded you to pay PKR {float(m.share_amount):,.0f} for '{group.title}'.",
-                notif_type='warning', icon='reminder'
+                title      = "Payment Reminder",
+                message    = f"{user.full_name} reminded you to pay PKR {float(m.share_amount):,.0f} for '{group.title}'.",
+                notif_type = 'warning',
+                icon       = 'reminder'
             )
 
     return jsonify({'message': f'Reminder sent to {len(pending)} member(s)'}), 200
@@ -325,14 +325,14 @@ def remind_members():
 @split_bp.route('/settle', methods=['POST'])
 @jwt_required()
 def settle_split():
-    user_id  = get_jwt_identity()
+    user_id  = int(get_jwt_identity())  # ← cast to int
     data     = request.get_json()
     group_id = data.get('group_id')
 
     group = BillSplitGroup.query.get(group_id)
     if not group:
         return jsonify({'error': 'Split not found'}), 404
-    if group.created_by != user_id:
+    if group.created_by != user_id:  # now both ints — works correctly
         return jsonify({'error': 'Only the creator can settle this split'}), 403
 
     group.status = 'settled'
@@ -343,11 +343,11 @@ def settle_split():
 @split_bp.route('/<int:group_id>', methods=['DELETE'])
 @jwt_required()
 def delete_split(group_id):
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())  # ← cast to int
     group   = BillSplitGroup.query.get(group_id)
     if not group:
         return jsonify({'error': 'Split not found'}), 404
-    if group.created_by != user_id:
+    if group.created_by != user_id:  # now both ints — works correctly
         return jsonify({'error': 'Only the creator can delete this split'}), 403
 
     db.session.delete(group)
